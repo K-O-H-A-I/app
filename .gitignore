@@ -1,9 +1,11 @@
 # Gradle
 .gradle/
 **/build/
+gradle.properties
 
 # Local config
 local.properties
+gradle.properties
 
 # Android Studio / IntelliJ
 .idea/
