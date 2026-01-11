@@ -16,6 +16,10 @@ import com.sitta.core.domain.LivenessResult
 import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.domain.QualityResult
 import com.sitta.core.domain.QualityStabilityGate
+import com.sitta.core.vision.FingerDetectionResult
+import com.sitta.core.vision.FingerDetector
+import com.sitta.core.vision.FingerMasker
+import com.sitta.core.vision.FingerSceneAnalyzer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +33,9 @@ class TrackAViewModel(
     private val settingsRepository: SettingsRepository,
     private val qualityAnalyzer: QualityAnalyzer,
     private val livenessDetector: LivenessDetector,
+    private val fingerDetector: FingerDetector,
+    private val fingerSceneAnalyzer: FingerSceneAnalyzer,
+    private val fingerMasker: FingerMasker,
 ) : ViewModel() {
     private val gate = QualityStabilityGate(500L)
     private val livenessFrames = ArrayDeque<Bitmap>()
@@ -38,10 +45,13 @@ class TrackAViewModel(
 
     private var latestFrame: Bitmap? = null
     private var latestRoi: Rect? = null
+    private var latestDetection: FingerDetectionResult? = null
+    private var lastDetectionMillis: Long = 0L
     private var livenessEnabled: Boolean = false
     private var lastLivenessResult: LivenessResult? = null
 
     init {
+        fingerDetector.initialize()
         viewModelScope.launch {
             settingsRepository.livenessEnabled.collect { enabled ->
                 livenessEnabled = enabled
@@ -55,18 +65,44 @@ class TrackAViewModel(
 
     fun onFrame(bitmap: Bitmap, roi: Rect, timestampMillis: Long) {
         latestFrame = bitmap
-        latestRoi = roi
         viewModelScope.launch(Dispatchers.Default) {
-            val result = qualityAnalyzer.analyze(bitmap, roi, timestampMillis)
-            val livenessPass = evaluateLivenessIfNeeded(bitmap, roi)
-            val combinedPass = result.pass && livenessPass
+            val detection = runDetection(bitmap, timestampMillis)
+            latestRoi = roi
+            latestDetection = detection
+
+            val effectiveRoi = roi
+            var result = qualityAnalyzer.analyze(bitmap, effectiveRoi, timestampMillis)
+
+            val detectionPass = detection.isDetected
+            val palmPass = detection.palmFacing
+            val scene = fingerSceneAnalyzer.analyze(bitmap, effectiveRoi)
+            val clutterPass = !scene.cluttered
+
+            val livenessPass = evaluateLivenessIfNeeded(bitmap, effectiveRoi)
+            val combinedPass = result.pass && detectionPass && palmPass && clutterPass && livenessPass
+
+            if (!detectionPass) {
+                result = result.copy(pass = false, topReason = "No finger detected")
+            } else if (!palmPass) {
+                result = result.copy(pass = false, topReason = "Use finger pad side")
+            } else if (!clutterPass) {
+                result = result.copy(pass = false, topReason = "Background too cluttered")
+            }
+
             val stablePass = gate.update(combinedPass, timestampMillis)
             _uiState.value = _uiState.value.copy(
                 qualityResult = result,
                 stablePass = stablePass,
                 captureEnabled = stablePass,
                 livenessResult = lastLivenessResult,
-                message = if (livenessEnabled && !livenessPass) "Liveness failed" else null,
+                detection = detection,
+                message = when {
+                    livenessEnabled && !livenessPass -> "Liveness failed"
+                    !detectionPass -> "No finger detected"
+                    !palmPass -> "Flip finger to pad side"
+                    !clutterPass -> "Background too cluttered"
+                    else -> null
+                },
             )
         }
     }
@@ -105,7 +141,8 @@ class TrackAViewModel(
                 roi.width(),
                 roi.height(),
             )
-            val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, roiBitmap)
+            val maskedRoi = fingerMasker.applyMask(roiBitmap)
+            val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, maskedRoi)
             if (roiResult is AppResult.Error) return@launch
 
             val qualityReport = QualityReport(
@@ -132,6 +169,65 @@ class TrackAViewModel(
             _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
         }
     }
+
+    fun captureFromBitmap(bitmap: Bitmap) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val roi = buildLeftEllipseRoi(bitmap.width, bitmap.height)
+            val detection = runDetection(bitmap, System.currentTimeMillis())
+            val effectiveRoi = roi
+            val qualityResult = qualityAnalyzer.analyze(bitmap, effectiveRoi, System.currentTimeMillis())
+
+            _uiState.value = _uiState.value.copy(
+                qualityResult = qualityResult,
+                detection = detection,
+            )
+
+            val tenantId = authManager.activeTenant.value.id
+            val session = when (val created = sessionRepository.createSession(tenantId)) {
+                is AppResult.Success -> created.value
+                is AppResult.Error -> return@launch
+            }
+
+            val rawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, bitmap)
+            if (rawResult is AppResult.Error) return@launch
+
+            val roiBitmap = Bitmap.createBitmap(
+                bitmap,
+                effectiveRoi.left,
+                effectiveRoi.top,
+                effectiveRoi.width(),
+                effectiveRoi.height(),
+            )
+            val maskedRoi = fingerMasker.applyMask(roiBitmap)
+            val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, maskedRoi)
+            if (roiResult is AppResult.Error) return@launch
+
+            val qualityReport = QualityReport(
+                sessionId = session.sessionId,
+                timestamp = System.currentTimeMillis(),
+                score0To100 = qualityResult.score0To100,
+                pass = qualityResult.pass,
+                metrics = qualityResult.metrics,
+                topReason = qualityResult.topReason,
+            )
+            sessionRepository.saveJson(session, ArtifactFilenames.QUALITY, qualityReport)
+
+            _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
+        }
+    }
+
+    private fun runDetection(bitmap: Bitmap, timestampMillis: Long): FingerDetectionResult {
+        val minIntervalMs = 120L
+        val last = latestDetection
+        return if (timestampMillis - lastDetectionMillis < minIntervalMs && last != null) {
+            last
+        } else {
+            val detection = fingerDetector.detectFinger(bitmap)
+            lastDetectionMillis = timestampMillis
+            detection
+        }
+    }
+
 }
 
 data class TrackAUiState(
@@ -139,6 +235,7 @@ data class TrackAUiState(
     val stablePass: Boolean = false,
     val captureEnabled: Boolean = false,
     val livenessResult: LivenessResult? = null,
+    val detection: FingerDetectionResult? = null,
     val message: String? = null,
     val lastSessionId: String? = null,
 )

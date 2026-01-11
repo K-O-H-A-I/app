@@ -8,6 +8,9 @@ import com.sitta.core.data.ConfigRepo
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.data.SettingsRepository
 import com.sitta.core.vision.MotionLivenessDetector
+import com.sitta.core.vision.FingerDetector
+import com.sitta.core.vision.FingerMasker
+import com.sitta.core.vision.FingerSceneAnalyzer
 import com.sitta.core.vision.OpenCvEnhancementPipeline
 import com.sitta.core.vision.OpenCvQualityAnalyzer
 import com.sitta.core.vision.SourceAfisMatcher
@@ -24,4 +27,8 @@ class AppContainer(context: Context) {
     val enhancementPipeline = OpenCvEnhancementPipeline()
     val matcher = SourceAfisMatcher()
     val livenessDetector = MotionLivenessDetector(DefaultConfig.value)
+    val fingerDetector = FingerDetector(context)
+    val fingerSceneAnalyzer = FingerSceneAnalyzer()
+    val fingerMasker = FingerMasker()
+    val themeManager = ThemeManager()
 }

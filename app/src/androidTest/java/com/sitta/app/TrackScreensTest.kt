@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import com.google.gson.Gson
 import com.sitta.core.common.QualityMetrics
@@ -19,6 +20,9 @@ import com.sitta.core.domain.LivenessResult
 import com.sitta.core.domain.Matcher
 import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.domain.QualityResult
+import com.sitta.core.vision.FingerDetector
+import com.sitta.core.vision.FingerMasker
+import com.sitta.core.vision.FingerSceneAnalyzer
 import com.sitta.feature.track_a.TrackAScreen
 import com.sitta.feature.track_b.TrackBScreen
 import com.sitta.feature.track_c.TrackCScreen
@@ -53,6 +57,9 @@ class TrackScreensTest {
                 return LivenessResult("PASS", 0.1, 0.1)
             }
         }
+        val fingerDetector = FingerDetector(context)
+        val fingerSceneAnalyzer = FingerSceneAnalyzer()
+        val fingerMasker = FingerMasker()
 
         composeRule.setContent {
             TrackAScreen(
@@ -61,11 +68,15 @@ class TrackScreensTest {
                 settingsRepository = settingsRepository,
                 qualityAnalyzer = qualityAnalyzer,
                 livenessDetector = livenessDetector,
+                fingerDetector = fingerDetector,
+                fingerSceneAnalyzer = fingerSceneAnalyzer,
+                fingerMasker = fingerMasker,
                 onCaptureComplete = {},
+                onBack = {},
                 enableCamera = false,
             )
         }
-        composeRule.onNodeWithText("Capture").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription("Capture").assertIsNotEnabled()
     }
 
     @Test
@@ -77,7 +88,7 @@ class TrackScreensTest {
             override suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): Bitmap = bitmap
         }
         composeRule.setContent {
-            TrackBScreen(sessionRepository, authManager, enhancementPipeline)
+            TrackBScreen(sessionRepository, authManager, enhancementPipeline, onBack = {})
         }
         composeRule.onNodeWithText("Load Last Capture").assertExists()
     }
@@ -96,15 +107,15 @@ class TrackScreensTest {
             ) = com.sitta.core.domain.MatchResult(threshold, emptyList())
         }
         composeRule.setContent {
-            TrackCScreen(sessionRepository, authManager, configRepo, matcher)
+            TrackCScreen(sessionRepository, authManager, configRepo, matcher, onBack = {}, onLiveCapture = {})
         }
-        composeRule.onNodeWithText("Run Match").assertExists()
+        composeRule.onNodeWithText("Run Comparison").assertExists()
     }
 
     @Test
     fun trackD_toggleVisible() {
         val settingsRepository = SettingsRepository()
-        composeRule.setContent { TrackDScreen(settingsRepository) }
-        composeRule.onNodeWithText("Enable Liveness Check").assertExists()
+        composeRule.setContent { TrackDScreen(settingsRepository, onBack = {}) }
+        composeRule.onNodeWithText("Liveness Detection").assertExists()
     }
 }

@@ -1,30 +1,40 @@
 # Gradle
-  .gradle/
-  **/build/
-  gradle/wrapper/*.zip
-  gradle/wrapper/dists/
-  gradle.properties
-  # Local config
-  local.properties
+.gradle/
+**/build/
 
-  # Android Studio / IntelliJ
-  .idea/
-  *.iml
-  *.ipr
-  *.iws
-  captures/
-  .externalNativeBuild/
-  .cxx/
+# Local config
+local.properties
+gradle.properties
+keystore.properties
 
-  # Logs
-  *.log
-  hs_err_pid*
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+captures/
+.externalNativeBuild/
+.cxx/
 
-  # OS files
-  # Keystores
-  *.jks
-  *.keystore
-  keystore.properties
+# Logs
+*.log
+hs_err_pid*
 
-  # Profiling
-  *.hprof
+# OS files
+.DS_Store
+Thumbs.db
+
+# APK/AAB outputs
+*.apk
+*.aab
+
+# Keystores
+*.jks
+*.keystore
+
+# Profiling
+*.hprof
+
+# Local Gradle distribution (do not commit)
+gradle/wrapper/*.zip
+gradle/wrapper/dists/

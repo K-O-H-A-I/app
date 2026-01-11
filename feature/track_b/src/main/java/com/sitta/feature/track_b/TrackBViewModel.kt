@@ -52,6 +52,15 @@ class TrackBViewModel(
         }
     }
 
+    fun exportEnhanced() {
+        val enhanced = _uiState.value.enhancedBitmap ?: return
+        val session = _uiState.value.session ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, enhanced)
+            _uiState.value = _uiState.value.copy(message = "Saved to session")
+        }
+    }
+
     private suspend fun processEnhancement(bitmap: Bitmap, session: SessionInfo, strength: Float) {
         val enhanced = enhancementPipeline.enhance(bitmap, strength)
         _uiState.value = _uiState.value.copy(enhancedBitmap = enhanced)
