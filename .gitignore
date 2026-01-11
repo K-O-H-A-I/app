@@ -3,7 +3,7 @@
   **/build/
   gradle/wrapper/*.zip
   gradle/wrapper/dists/
-  
+  gradle.properties
   # Local config
   local.properties
 
