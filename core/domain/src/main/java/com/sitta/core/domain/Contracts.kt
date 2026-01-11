@@ -36,8 +36,18 @@ class QualityStabilityGate(private val stableDurationMs: Long = 500L) {
     }
 }
 
+data class EnhancementStep(
+    val name: String,
+    val durationMs: Long,
+)
+
+data class EnhancementResult(
+    val bitmap: Bitmap,
+    val steps: List<EnhancementStep>,
+)
+
 interface EnhancementPipeline {
-    suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): Bitmap
+    suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): EnhancementResult
 }
 
 data class MatchCandidateResult(

@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -128,11 +127,8 @@ fun TrackCScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RoundIconButton(icon = Icons.Outlined.ArrowBack, contentDescription = "Back", onClick = onBack)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "Matcher", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Text(text = "1:N Verification", color = Color(0xFF7C8A9B), fontSize = 12.sp)
-            }
-            RoundIconButton(icon = Icons.Outlined.MoreVert, contentDescription = "Menu", onClick = {})
+            Text(text = "Matcher", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.size(42.dp))
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -164,7 +160,7 @@ fun TrackCScreen(
                         viewModel.setProbe(bitmap, probeFile.name)
                     }
                 })
-                ActionPill(text = "Pick Probe", onClick = { probePicker.launch("image/*") })
+                ActionPill(text = "Pick Photo", onClick = { probePicker.launch("image/*") })
                 ActionPill(text = "Add Candidates", onClick = { candidatePicker.launch(arrayOf("image/*")) })
             }
         }

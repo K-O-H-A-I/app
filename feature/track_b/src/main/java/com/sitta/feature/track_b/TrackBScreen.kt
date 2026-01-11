@@ -24,8 +24,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -48,16 +46,18 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sitta.core.data.AuthManager
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.domain.EnhancementPipeline
+import com.sitta.core.domain.QualityAnalyzer
 
 class TrackBViewModelFactory(
     private val sessionRepository: SessionRepository,
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
+    private val qualityAnalyzer: QualityAnalyzer,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TrackBViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TrackBViewModel(sessionRepository, authManager, enhancementPipeline) as T
+            return TrackBViewModel(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer) as T
         }
         error("Unknown ViewModel class")
     }
@@ -68,10 +68,11 @@ fun TrackBScreen(
     sessionRepository: SessionRepository,
     authManager: AuthManager,
     enhancementPipeline: EnhancementPipeline,
+    qualityAnalyzer: QualityAnalyzer,
     onBack: () -> Unit,
 ) {
     val viewModel: TrackBViewModel = viewModel(
-        factory = TrackBViewModelFactory(sessionRepository, authManager, enhancementPipeline),
+        factory = TrackBViewModelFactory(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer),
     )
     val uiState by viewModel.uiState.collectAsState()
 
@@ -92,7 +93,7 @@ fun TrackBScreen(
                 Text(text = "Enhancement", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Text(text = "Complete", color = Color(0xFF38D39F), fontSize = 12.sp)
             }
-            RoundIconButton(icon = Icons.Outlined.MoreVert, contentDescription = "Menu", onClick = {})
+            Spacer(modifier = Modifier.size(42.dp))
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -121,11 +122,13 @@ fun TrackBScreen(
         SectionTitle(text = "Processing Steps")
         Spacer(modifier = Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ProcessingItem("Noise Reduction", "0.3s")
-            ProcessingItem("Contrast Enhancement", "0.2s")
-            ProcessingItem("Ridge Detection", "0.5s")
-            ProcessingItem("Minutiae Extraction", "0.4s")
-            ProcessingItem("Quality Assessment", "0.3s")
+            if (uiState.steps.isEmpty()) {
+                ProcessingItem("Waiting for enhancement", "--")
+            } else {
+                uiState.steps.forEach { step ->
+                    ProcessingItem(step.name, "${step.durationMs}ms")
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -145,13 +148,33 @@ fun TrackBScreen(
         SectionTitle(text = "Quality Metrics")
         Spacer(modifier = Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MetricCard(title = "Quality Score", value = "${uiState.enhancedBitmap?.let { 94 } ?: 0}%", modifier = Modifier.weight(1f))
-            MetricCard(title = "Ridge Count", value = "127", modifier = Modifier.weight(1f))
+            MetricCard(
+                title = "Quality Score",
+                value = "${uiState.qualityResult?.score0To100 ?: 0}%",
+                modifier = Modifier.weight(1f),
+                accent = Color(0xFF34D399),
+            )
+            MetricCard(
+                title = "Blur Score",
+                value = uiState.qualityResult?.metrics?.blurScore?.let { "%.1f".format(it) } ?: "--",
+                modifier = Modifier.weight(1f),
+                accent = Color(0xFF60A5FA),
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MetricCard(title = "Minutiae", value = "42 pts", modifier = Modifier.weight(1f))
-            MetricCard(title = "Clarity", value = "91%", modifier = Modifier.weight(1f), accent = Color(0xFF7C3AED))
+            MetricCard(
+                title = "Illumination",
+                value = uiState.qualityResult?.metrics?.illuminationMean?.let { "%.1f".format(it) } ?: "--",
+                modifier = Modifier.weight(1f),
+                accent = Color(0xFFFBBF24),
+            )
+            MetricCard(
+                title = "Coverage",
+                value = uiState.qualityResult?.metrics?.coverageRatio?.let { "%.2f".format(it) } ?: "--",
+                modifier = Modifier.weight(1f),
+                accent = Color(0xFF7C3AED),
+            )
         }
 
         uiState.message?.let {
@@ -173,15 +196,6 @@ fun TrackBScreen(
                 shape = RoundedCornerShape(20.dp),
             ) {
                 Text(text = "Save & Export", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .background(Color(0xFF1E242B), CircleShape)
-                    .clickable { viewModel.exportEnhanced() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(imageVector = Icons.Outlined.Share, contentDescription = "Share", tint = Color.White)
             }
         }
     }

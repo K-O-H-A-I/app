@@ -38,6 +38,7 @@ class TrackAViewModel(
     private val fingerMasker: FingerMasker,
 ) : ViewModel() {
     private val gate = QualityStabilityGate(500L)
+    private val detectionGate = QualityStabilityGate(300L)
     private val livenessFrames = ArrayDeque<Bitmap>()
 
     private val _uiState = MutableStateFlow(TrackAUiState())
@@ -74,17 +75,16 @@ class TrackAViewModel(
             var result = qualityAnalyzer.analyze(bitmap, effectiveRoi, timestampMillis)
 
             val detectionPass = detection.isDetected
-            val palmPass = detection.palmFacing
             val scene = fingerSceneAnalyzer.analyze(bitmap, effectiveRoi)
             val clutterPass = !scene.cluttered
 
+            val detectionStable = detectionGate.update(detectionPass && clutterPass, timestampMillis)
             val livenessPass = evaluateLivenessIfNeeded(bitmap, effectiveRoi)
-            val combinedPass = result.pass && detectionPass && palmPass && clutterPass && livenessPass
+            val combinedPass = result.pass && detectionStable && livenessPass
+            val centerScore = computeCenterScore(detection.boundingBox, effectiveRoi, bitmap.width, bitmap.height)
 
             if (!detectionPass) {
                 result = result.copy(pass = false, topReason = "No finger detected")
-            } else if (!palmPass) {
-                result = result.copy(pass = false, topReason = "Use finger pad side")
             } else if (!clutterPass) {
                 result = result.copy(pass = false, topReason = "Background too cluttered")
             }
@@ -96,10 +96,10 @@ class TrackAViewModel(
                 captureEnabled = stablePass,
                 livenessResult = lastLivenessResult,
                 detection = detection,
+                centerScore = centerScore,
                 message = when {
                     livenessEnabled && !livenessPass -> "Liveness failed"
                     !detectionPass -> "No finger detected"
-                    !palmPass -> "Flip finger to pad side"
                     !clutterPass -> "Background too cluttered"
                     else -> null
                 },
@@ -125,6 +125,7 @@ class TrackAViewModel(
         val roi = latestRoi ?: return
         val qualityResult = _uiState.value.qualityResult ?: return
         val tenantId = authManager.activeTenant.value.id
+        val detection = latestDetection
 
         viewModelScope.launch(Dispatchers.IO) {
             val session = when (val created = sessionRepository.createSession(tenantId)) {
@@ -141,7 +142,11 @@ class TrackAViewModel(
                 roi.width(),
                 roi.height(),
             )
-            val maskedRoi = fingerMasker.applyMask(roiBitmap)
+            val maskedRoi = if (detection != null && detection.landmarks.isNotEmpty()) {
+                fingerMasker.applyFingerTipMask(roiBitmap, detection.landmarks, roi, frame.width, frame.height)
+            } else {
+                fingerMasker.applyMask(roiBitmap)
+            }
             val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, maskedRoi)
             if (roiResult is AppResult.Error) return@launch
 
@@ -228,6 +233,23 @@ class TrackAViewModel(
         }
     }
 
+    private fun computeCenterScore(
+        boundingBox: android.graphics.RectF?,
+        roi: Rect,
+        width: Int,
+        height: Int,
+    ): Int {
+        if (boundingBox == null) return 0
+        val boxCenterX = (boundingBox.left + boundingBox.right) / 2f * width
+        val boxCenterY = (boundingBox.top + boundingBox.bottom) / 2f * height
+        val roiCenterX = roi.exactCenterX()
+        val roiCenterY = roi.exactCenterY()
+        val dx = (boxCenterX - roiCenterX) / roi.width()
+        val dy = (boxCenterY - roiCenterY) / roi.height()
+        val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+        return ((1.0 - (dist / 0.75)).coerceIn(0.0, 1.0) * 100).toInt()
+    }
+
 }
 
 data class TrackAUiState(
@@ -236,6 +258,7 @@ data class TrackAUiState(
     val captureEnabled: Boolean = false,
     val livenessResult: LivenessResult? = null,
     val detection: FingerDetectionResult? = null,
+    val centerScore: Int = 0,
     val message: String? = null,
     val lastSessionId: String? = null,
 )

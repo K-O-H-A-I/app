@@ -10,6 +10,8 @@ import com.sitta.core.common.SessionInfo
 import com.sitta.core.data.AuthManager
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.domain.EnhancementPipeline
+import com.sitta.core.domain.QualityAnalyzer
+import com.sitta.core.domain.QualityResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +22,7 @@ class TrackBViewModel(
     private val sessionRepository: SessionRepository,
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
+    private val qualityAnalyzer: QualityAnalyzer,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TrackBUiState())
     val uiState: StateFlow<TrackBUiState> = _uiState.asStateFlow()
@@ -62,15 +65,27 @@ class TrackBViewModel(
     }
 
     private suspend fun processEnhancement(bitmap: Bitmap, session: SessionInfo, strength: Float) {
-        val enhanced = enhancementPipeline.enhance(bitmap, strength)
-        _uiState.value = _uiState.value.copy(enhancedBitmap = enhanced)
-        sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, enhanced)
+        val result = enhancementPipeline.enhance(bitmap, strength)
+        val t0 = System.nanoTime()
+        val quality = qualityAnalyzer.analyze(
+            result.bitmap,
+            android.graphics.Rect(0, 0, result.bitmap.width, result.bitmap.height),
+        )
+        val qualityMs = ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1)
+        _uiState.value = _uiState.value.copy(
+            enhancedBitmap = result.bitmap,
+            steps = result.steps + com.sitta.core.domain.EnhancementStep("Quality Check", qualityMs),
+            qualityResult = quality,
+        )
+        sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, result.bitmap)
     }
 }
 
 data class TrackBUiState(
     val rawBitmap: Bitmap? = null,
     val enhancedBitmap: Bitmap? = null,
+    val steps: List<com.sitta.core.domain.EnhancementStep> = emptyList(),
+    val qualityResult: QualityResult? = null,
     val sharpenStrength: Float = 1f,
     val session: SessionInfo? = null,
     val message: String? = null,

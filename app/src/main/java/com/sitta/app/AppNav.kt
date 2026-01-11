@@ -17,6 +17,7 @@ fun SittaApp(container: AppContainer) {
         composable("home") {
             TrackSelectorScreen(
                 authManager = container.authManager,
+                sessionRepository = container.sessionRepository,
                 onTrackA = { navController.navigate("trackA") },
                 onTrackB = { navController.navigate("trackB") },
                 onTrackC = { navController.navigate("trackC") },
@@ -44,6 +45,7 @@ fun SittaApp(container: AppContainer) {
                 sessionRepository = container.sessionRepository,
                 authManager = container.authManager,
                 enhancementPipeline = container.enhancementPipeline,
+                qualityAnalyzer = container.qualityAnalyzer,
                 onBack = { navController.popBackStack() },
             )
         }

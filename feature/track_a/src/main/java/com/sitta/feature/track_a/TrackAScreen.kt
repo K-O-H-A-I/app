@@ -2,10 +2,7 @@
 
 package com.sitta.feature.track_a
 
-import android.graphics.BitmapFactory
 import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -29,9 +26,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FlipCameraAndroid
-import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.FlashOff
+import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
@@ -64,6 +61,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sitta.feature.track_a.BuildConfig
+import com.sitta.core.common.DefaultConfig
 import com.sitta.core.data.AuthManager
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.data.SettingsRepository
@@ -142,15 +141,8 @@ fun TrackAScreen(
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     var useFrontCamera by remember { mutableStateOf(false) }
 
-    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            val bitmap = BitmapFactory.decodeStream(stream)
-            if (bitmap != null) {
-                viewModel.captureFromBitmap(bitmap)
-            }
-        }
-    }
+    val cameraControlState = remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    var torchEnabled by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner, enableCamera, useFrontCamera) {
         if (!enableCamera) {
@@ -179,12 +171,13 @@ fun TrackAScreen(
             }
             try {
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
+                val camera = cameraProvider.bindToLifecycle(
                     lifecycleOwner,
                     if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
                     analysis,
                 )
+                cameraControlState.value = camera.cameraControl
             } catch (t: Throwable) {
                 Log.e("TrackA", "Camera binding failed", t)
             }
@@ -197,9 +190,20 @@ fun TrackAScreen(
     }
 
     val quality = uiState.qualityResult
-    val focusScore = quality?.metrics?.blurScore?.let { ((it / 150.0) * 100).toInt().coerceIn(0, 100) } ?: 0
-    val lightScore = quality?.metrics?.illuminationMean?.let { ((it / 255.0) * 100).toInt().coerceIn(0, 100) } ?: 0
-    val centerScore = quality?.metrics?.coverageRatio?.let { (it * 100).toInt().coerceIn(0, 100) } ?: 0
+    val blurTarget = DefaultConfig.value.blurThreshold
+    val focusScore = quality?.metrics?.blurScore?.let {
+        ((it / blurTarget) * 100).toInt().coerceIn(0, 100)
+    } ?: 0
+    val lightScore = quality?.metrics?.illuminationMean?.let {
+        val min = DefaultConfig.value.illuminationMin
+        val max = DefaultConfig.value.illuminationMax
+        when {
+            it < min -> ((it / min) * 100).toInt()
+            it > max -> ((max / it) * 100).toInt()
+            else -> 100
+        }.coerceIn(0, 100)
+    } ?: 0
+    val centerScore = uiState.centerScore
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -219,6 +223,9 @@ fun TrackAScreen(
                     ),
             )
             CameraOverlay(isReady = uiState.captureEnabled)
+            if (BuildConfig.DEBUG) {
+                LandmarkOverlay(landmarks = uiState.detection?.landmarks.orEmpty())
+            }
 
             Column(
                 modifier = Modifier
@@ -227,17 +234,28 @@ fun TrackAScreen(
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column {
-                    TopBar(onBack = onBack, onClose = onBack)
+                    TopBar(onBack = onBack)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0B0F14).copy(alpha = 0.9f), RoundedCornerShape(18.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        StatusChip("Focus", focusScore, quality?.passes?.focus == true)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        StatusChip("Light", lightScore, quality?.passes?.light == true)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        StatusChip("Center", centerScore, quality?.passes?.coverage == true)
+                        Row(horizontalArrangement = Arrangement.Center) {
+                            StatusChip("Focus", focusScore, quality?.passes?.focus == true)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            StatusChip("Light", lightScore, quality?.passes?.light == true)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            StatusChip("Center", centerScore, quality?.passes?.coverage == true)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Cumulative ${quality?.score0To100 ?: 0}",
+                            color = Color(0xFFB8C0CC),
+                            fontSize = 12.sp,
+                        )
                     }
                 }
 
@@ -249,7 +267,11 @@ fun TrackAScreen(
                 BottomCaptureBar(
                     captureEnabled = uiState.captureEnabled,
                     onCapture = { viewModel.capture() },
-                    onOpenGallery = { galleryLauncher.launch("image/*") },
+                    onFlashToggle = {
+                        torchEnabled = !torchEnabled
+                        cameraControlState.value?.enableTorch(torchEnabled)
+                    },
+                    torchEnabled = torchEnabled,
                     onSwitchCamera = { useFrontCamera = !useFrontCamera },
                 )
             }
@@ -258,7 +280,7 @@ fun TrackAScreen(
 }
 
 @Composable
-private fun TopBar(onBack: () -> Unit, onClose: () -> Unit) {
+private fun TopBar(onBack: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -273,7 +295,7 @@ private fun TopBar(onBack: () -> Unit, onClose: () -> Unit) {
                 letterSpacing = 1.2.sp,
             )
         }
-        RoundIconButton(icon = Icons.Outlined.Close, contentDescription = "Close", onClick = onClose)
+        Spacer(modifier = Modifier.size(44.dp))
     }
 }
 
@@ -353,7 +375,8 @@ private fun StatusBanner(isReady: Boolean, message: String?) {
 private fun BottomCaptureBar(
     captureEnabled: Boolean,
     onCapture: () -> Unit,
-    onOpenGallery: () -> Unit,
+    onFlashToggle: () -> Unit,
+    torchEnabled: Boolean,
     onSwitchCamera: () -> Unit,
 ) {
     Row(
@@ -364,9 +387,9 @@ private fun BottomCaptureBar(
         horizontalArrangement = Arrangement.Center,
     ) {
         SideActionButton(
-            icon = Icons.Outlined.PhotoLibrary,
-            contentDescription = "Open gallery",
-            onClick = onOpenGallery,
+            icon = if (torchEnabled) Icons.Outlined.FlashOn else Icons.Outlined.FlashOff,
+            contentDescription = "Toggle flash",
+            onClick = onFlashToggle,
         )
         Spacer(modifier = Modifier.width(24.dp))
         CaptureButton(enabled = captureEnabled, onClick = onCapture)
@@ -437,4 +460,32 @@ private fun StatusChip(label: String, score: Int, pass: Boolean) {
         colors = colors,
         shape = RoundedCornerShape(14.dp),
     )
+}
+
+@Composable
+private fun LandmarkOverlay(landmarks: List<com.sitta.core.vision.FingerLandmark>) {
+    if (landmarks.isEmpty()) return
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val pairs = listOf(
+            com.sitta.core.vision.LandmarkType.INDEX_DIP to com.sitta.core.vision.LandmarkType.INDEX_TIP,
+            com.sitta.core.vision.LandmarkType.MIDDLE_DIP to com.sitta.core.vision.LandmarkType.MIDDLE_TIP,
+            com.sitta.core.vision.LandmarkType.RING_DIP to com.sitta.core.vision.LandmarkType.RING_TIP,
+            com.sitta.core.vision.LandmarkType.PINKY_DIP to com.sitta.core.vision.LandmarkType.PINKY_TIP,
+        )
+        pairs.forEach { (dipType, tipType) ->
+            val dip = landmarks.firstOrNull { it.type == dipType }
+            val tip = landmarks.firstOrNull { it.type == tipType }
+            if (dip != null && tip != null) {
+                val dipPt = Offset(dip.x * size.width, dip.y * size.height)
+                val tipPt = Offset(tip.x * size.width, tip.y * size.height)
+                drawLine(
+                    color = Color(0xFF38D39F),
+                    start = dipPt,
+                    end = tipPt,
+                    strokeWidth = 2.dp.toPx(),
+                )
+                drawCircle(Color(0xFF38D39F), radius = 4.dp.toPx(), center = tipPt)
+            }
+        }
+    }
 }

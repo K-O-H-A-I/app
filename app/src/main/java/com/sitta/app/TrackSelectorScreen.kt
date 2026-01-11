@@ -14,11 +14,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.CompareArrows
@@ -39,11 +38,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.sitta.core.common.ArtifactFilenames
+import com.sitta.core.common.SessionInfo
 import com.sitta.core.data.AuthManager
+import com.sitta.core.data.SessionRepository
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 @Composable
 fun TrackSelectorScreen(
     authManager: AuthManager,
+    sessionRepository: SessionRepository,
     onTrackA: () -> Unit,
     onTrackB: () -> Unit,
     onTrackC: () -> Unit,
@@ -54,14 +60,17 @@ fun TrackSelectorScreen(
     val activeTenant by authManager.activeTenant.collectAsState()
     val background = if (isDark) Color(0xFF121212) else Color(0xFFF7F7F7)
     val surface = if (isDark) Color(0xFF1E1E1E) else Color.White
+    val sessions = sessionRepository.listSessions(activeTenant.id)
+    val scansToday = countScansToday(sessions)
+    val recentActivity = buildRecentActivity(sessionRepository, sessions)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(background)
-            .padding(horizontal = 20.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
-        Spacer(modifier = Modifier.height(18.dp))
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
@@ -121,28 +130,20 @@ fun TrackSelectorScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "SYSTEM STATUS",
+                        text = "SESSION SUMMARY",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isDark) Color(0xFF94A3B8) else Color(0xFF6B7280),
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color(0xFF22C55E), CircleShape),
-                        )
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text(
-                            text = "All Systems Operational",
-                            color = if (isDark) Color(0xFF34D399) else Color(0xFF16A34A),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
+                    Text(
+                        text = "Last session: ${sessions.firstOrNull()?.sessionId?.take(6) ?: "--"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280),
+                    )
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "127",
+                        text = scansToday.toString(),
                         style = MaterialTheme.typography.titleLarge,
                         color = if (isDark) Color.White else Color(0xFF111827),
                         fontWeight = FontWeight.Bold,
@@ -171,60 +172,14 @@ fun TrackSelectorScreen(
             TrackCardItem("Settings", "System configuration", Icons.Outlined.Settings, Color(0xFF6B7280), onTrackD),
         )
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            items(cards) { item ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = surface),
-                    shape = RoundedCornerShape(28.dp),
-                    modifier = Modifier
-                        .height(180.dp)
-                        .clickable { item.onClick() },
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(18.dp),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .background(item.iconColor, RoundedCornerShape(18.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            androidx.compose.material3.Icon(
-                                imageVector = item.icon,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp),
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = item.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (isDark) Color.White else Color(0xFF111111),
-                            )
-                            Text(
-                                text = item.subtitle,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280),
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Open  >",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color(0xFF1FD3B4),
-                            )
-                        }
-                    }
-                }
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
+            TrackCard(item = cards[0], surface = surface, isDark = isDark, modifier = Modifier.weight(1f))
+            TrackCard(item = cards[1], surface = surface, isDark = isDark, modifier = Modifier.weight(1f))
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
+            TrackCard(item = cards[2], surface = surface, isDark = isDark, modifier = Modifier.weight(1f))
+            TrackCard(item = cards[3], surface = surface, isDark = isDark, modifier = Modifier.weight(1f))
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -240,12 +195,16 @@ fun TrackSelectorScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ActivityRow("Fingerprint captured", "2 min ago")
-                ActivityRow("Match completed", "15 min ago")
-                ActivityRow("Enhancement processed", "1 hour ago")
+                if (recentActivity.isEmpty()) {
+                    ActivityRow("No recent activity", "--")
+                } else {
+                    recentActivity.forEach { item ->
+                        ActivityRow(item.title, item.timeLabel)
+                    }
+                }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
@@ -256,6 +215,61 @@ private data class TrackCardItem(
     val iconColor: Color,
     val onClick: () -> Unit,
 )
+
+private data class ActivityItem(
+    val title: String,
+    val timeLabel: String,
+)
+
+@Composable
+private fun TrackCard(item: TrackCardItem, surface: Color, isDark: Boolean, modifier: Modifier = Modifier) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = surface),
+        shape = RoundedCornerShape(28.dp),
+        modifier = modifier
+            .height(180.dp)
+            .clickable { item.onClick() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(item.iconColor, RoundedCornerShape(18.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = item.icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            Column {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (isDark) Color.White else Color(0xFF111111),
+                )
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Open  >",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color(0xFF1FD3B4),
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun ActivityRow(title: String, time: String) {
@@ -271,5 +285,58 @@ private fun ActivityRow(title: String, time: String) {
             Text(text = time, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
         Text(text = ">", color = Color(0xFF6B7280))
+    }
+}
+
+private fun countScansToday(sessions: List<SessionInfo>): Int {
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    return sessions.count { session ->
+        val date = Instant.ofEpochMilli(session.timestamp).atZone(zone).toLocalDate()
+        date == today
+    }
+}
+
+private fun buildRecentActivity(
+    sessionRepository: SessionRepository,
+    sessions: List<SessionInfo>,
+): List<ActivityItem> {
+    val items = mutableListOf<ActivityItemWithTime>()
+    val zone = ZoneId.systemDefault()
+    sessions.forEach { session ->
+        val quality = sessionRepository.sessionArtifactPath(session, ArtifactFilenames.QUALITY)
+        if (quality.exists()) {
+            items.add(ActivityItemWithTime("Fingerprint captured", quality.lastModified()))
+        }
+        val enhanced = sessionRepository.sessionArtifactPath(session, ArtifactFilenames.ENHANCED)
+        if (enhanced.exists()) {
+            items.add(ActivityItemWithTime("Enhancement processed", enhanced.lastModified()))
+        }
+        val match = sessionRepository.sessionArtifactPath(session, ArtifactFilenames.MATCH)
+        if (match.exists()) {
+            items.add(ActivityItemWithTime("Match completed", match.lastModified()))
+        }
+    }
+    return items.sortedByDescending { it.timestamp }.take(3).map {
+        ActivityItem(it.title, formatRelative(it.timestamp, zone))
+    }
+}
+
+private data class ActivityItemWithTime(
+    val title: String,
+    val timestamp: Long,
+)
+
+private fun formatRelative(timestamp: Long, zone: ZoneId): String {
+    val now = Instant.now().toEpochMilli()
+    val deltaMinutes = ((now - timestamp) / 60000).coerceAtLeast(0)
+    return when {
+        deltaMinutes < 1 -> "just now"
+        deltaMinutes < 60 -> "${deltaMinutes} min ago"
+        deltaMinutes < 24 * 60 -> "${deltaMinutes / 60} hour ago"
+        else -> {
+            val date = Instant.ofEpochMilli(timestamp).atZone(zone).toLocalDate()
+            date.toString()
+        }
     }
 }

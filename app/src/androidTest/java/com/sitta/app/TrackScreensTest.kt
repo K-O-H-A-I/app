@@ -15,6 +15,8 @@ import com.sitta.core.data.ConfigRepo
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.data.SettingsRepository
 import com.sitta.core.domain.EnhancementPipeline
+import com.sitta.core.domain.EnhancementResult
+import com.sitta.core.domain.EnhancementStep
 import com.sitta.core.domain.LivenessDetector
 import com.sitta.core.domain.LivenessResult
 import com.sitta.core.domain.Matcher
@@ -85,10 +87,24 @@ class TrackScreensTest {
         val sessionRepository = SessionRepository(context, Gson())
         val authManager = AuthManager()
         val enhancementPipeline = object : EnhancementPipeline {
-            override suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): Bitmap = bitmap
+            override suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): EnhancementResult {
+                return EnhancementResult(bitmap, listOf(EnhancementStep("Test", 1)))
+            }
+        }
+        val qualityAnalyzer = object : QualityAnalyzer {
+            override fun analyze(bitmap: Bitmap, roi: Rect, timestampMillis: Long): QualityResult {
+                return QualityResult(
+                    metrics = QualityMetrics(0.0, 0.0, 0.0, 0.0),
+                    passes = com.sitta.core.common.QualityMetricPasses(false, false, false, false),
+                    score0To100 = 0,
+                    pass = false,
+                    topReason = "N/A",
+                    timestampMillis = timestampMillis,
+                )
+            }
         }
         composeRule.setContent {
-            TrackBScreen(sessionRepository, authManager, enhancementPipeline, onBack = {})
+            TrackBScreen(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer, onBack = {})
         }
         composeRule.onNodeWithText("Load Last Capture").assertExists()
     }
