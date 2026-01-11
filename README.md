@@ -1,7 +1,7 @@
 # SITTA Prototype (Android)
 
 This is a multi-module Android prototype for the SITAA contactless fingerprint workflow. It runs fully offline and stores session artifacts under internal storage.
-All build and runtime inputs live under `PRODUCT/`; reference repositories are not used at build time.
+All build and runtime inputs live under `app/`; reference repositories are not used at build time.
 
 ## Modules
 - `app`: Compose navigation, app shell, dependency wiring
@@ -15,7 +15,7 @@ All build and runtime inputs live under `PRODUCT/`; reference repositories are n
 - `feature/track_d`: Liveness settings UI
 
 ## Build
-Open `PRODUCT/` in Android Studio, or run from the command line:
+Open `app/` in Android Studio, or run from the command line:
 
 ```bash
 ./gradlew assembleDebug
@@ -33,6 +33,7 @@ To run tests:
 - OpenCV is initialized lazily by `core/vision/OpenCvUtils` on first use.
 - All session artifacts are stored under `Context.filesDir/sessions/<tenant>/<sessionId>/`.
 - Thresholds are loaded from `core/common/src/main/assets/config.json` at startup.
+- Finger detection uses MediaPipe Hand Landmarker with `app/src/main/assets/hand_landmarker.task`.
 
 ## Prerequisites
 - JDK 17 (`JAVA_HOME` should point to `/usr/lib/jvm/java-17-openjdk-amd64` in this environment).

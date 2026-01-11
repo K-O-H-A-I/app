@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import com.sitta.app.ui.theme.SittaTheme
 
 class MainActivity : ComponentActivity() {
@@ -21,8 +22,10 @@ class MainActivity : ComponentActivity() {
                     container.livenessDetector.updateConfig(config)
                 }
             }
-            SittaTheme {
-                SittaApp(container)
+            SittaTheme(isDark = container.themeManager.isDark.collectAsState().value) {
+                PermissionGate {
+                    SittaApp(container)
+                }
             }
         }
     }

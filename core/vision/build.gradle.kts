@@ -33,6 +33,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.opencv)
     implementation(libs.sourceafis)
+    implementation(libs.mediapipe.tasks.vision)
 
     testImplementation(libs.junit)
 }

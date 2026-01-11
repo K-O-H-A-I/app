@@ -21,6 +21,8 @@ fun SittaApp(container: AppContainer) {
                 onTrackB = { navController.navigate("trackB") },
                 onTrackC = { navController.navigate("trackC") },
                 onTrackD = { navController.navigate("trackD") },
+                onToggleTheme = { container.themeManager.toggle() },
+                isDark = container.themeManager.isDark.value,
             )
         }
         composable("trackA") {
@@ -30,7 +32,11 @@ fun SittaApp(container: AppContainer) {
                 settingsRepository = container.settingsRepository,
                 qualityAnalyzer = container.qualityAnalyzer,
                 livenessDetector = container.livenessDetector,
+                fingerDetector = container.fingerDetector,
+                fingerSceneAnalyzer = container.fingerSceneAnalyzer,
+                fingerMasker = container.fingerMasker,
                 onCaptureComplete = { navController.navigate("trackB") },
+                onBack = { navController.popBackStack() },
             )
         }
         composable("trackB") {
@@ -38,6 +44,7 @@ fun SittaApp(container: AppContainer) {
                 sessionRepository = container.sessionRepository,
                 authManager = container.authManager,
                 enhancementPipeline = container.enhancementPipeline,
+                onBack = { navController.popBackStack() },
             )
         }
         composable("trackC") {
@@ -46,10 +53,15 @@ fun SittaApp(container: AppContainer) {
                 authManager = container.authManager,
                 configRepo = container.configRepo,
                 matcher = container.matcher,
+                onBack = { navController.popBackStack() },
+                onLiveCapture = { navController.navigate("trackA") },
             )
         }
         composable("trackD") {
-            TrackDScreen(settingsRepository = container.settingsRepository)
+            TrackDScreen(
+                settingsRepository = container.settingsRepository,
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }
