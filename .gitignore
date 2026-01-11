@@ -1,0 +1,30 @@
+# Gradle
+  .gradle/
+  **/build/
+  gradle/wrapper/*.zip
+  gradle/wrapper/dists/
+  
+  # Local config
+  local.properties
+
+  # Android Studio / IntelliJ
+  .idea/
+  *.iml
+  *.ipr
+  *.iws
+  captures/
+  .externalNativeBuild/
+  .cxx/
+
+  # Logs
+  *.log
+  hs_err_pid*
+
+  # OS files
+  # Keystores
+  *.jks
+  *.keystore
+  keystore.properties
+
+  # Profiling
+  *.hprof

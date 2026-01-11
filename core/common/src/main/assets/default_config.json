@@ -1,0 +1,10 @@
+{
+  "blurThreshold": 50.0,
+  "illuminationMin": 80.0,
+  "illuminationMax": 180.0,
+  "coverageMin": 0.6,
+  "stabilityMax": 1.5,
+  "matchThreshold": 40.0,
+  "livenessVarianceMin": 0.02,
+  "livenessVarianceMax": 0.5
+}
