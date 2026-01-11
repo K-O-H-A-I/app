@@ -161,7 +161,7 @@ fun TrackAScreen(
             analysis.setAnalyzer(analysisExecutor) { imageProxy ->
                 try {
                     val bitmap = imageProxy.toBitmap()
-                    val roi = buildLeftEllipseRoi(bitmap.width, bitmap.height)
+                    val roi = buildGuideRoi(bitmap.width, bitmap.height)
                     viewModel.onFrame(bitmap, roi, System.currentTimeMillis())
                 } catch (t: Throwable) {
                     Log.w("TrackA", "Frame analysis failed", t)
@@ -319,32 +319,28 @@ private fun RoundIconButton(
 @Composable
 private fun CameraOverlay(isReady: Boolean) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val guideWidth = size.width * 0.52f
-        val guideHeight = size.height * 0.68f
-        val left = size.width * 0.08f
-        val top = (size.height - guideHeight) / 2f
-        val borderColor = if (isReady) Color(0xFF10B981) else Color(0xFFF97316)
+        val guideWidth = (size.width * 0.78f).coerceIn(size.width * 0.65f, size.width * 0.85f)
+        val guideHeight = (size.height * 0.22f).coerceIn(size.height * 0.18f, size.height * 0.28f)
+        val left = (size.width - guideWidth) / 2f
+        val top = ((size.height - guideHeight) / 2f) - size.height * 0.08f
+        val safeTop = top.coerceAtLeast(0f)
+        val rect = androidx.compose.ui.geometry.Rect(left, safeTop, left + guideWidth, safeTop + guideHeight)
+        val radius = (minOf(guideWidth, guideHeight) * 0.28f).coerceAtLeast(18.dp.toPx())
 
-        drawOval(
+        val scrimPath = androidx.compose.ui.graphics.Path().apply {
+            fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+            addRect(androidx.compose.ui.geometry.Rect(Offset.Zero, size))
+            addRoundRect(androidx.compose.ui.geometry.RoundRect(rect, radius, radius))
+        }
+        drawPath(scrimPath, color = Color.Black.copy(alpha = 0.55f))
+
+        val borderColor = if (isReady) Color(0xFF10B981) else Color(0xFF9CA3AF)
+        drawRoundRect(
             color = borderColor,
-            topLeft = Offset(left, top),
-            size = Size(guideWidth, guideHeight),
-            style = Stroke(width = 4.dp.toPx()),
-        )
-
-        val crossX = left + guideWidth * 0.5f
-        val crossY = top + guideHeight * 0.5f
-        drawLine(
-            color = Color.White.copy(alpha = 0.35f),
-            start = Offset(crossX - 18.dp.toPx(), crossY),
-            end = Offset(crossX + 18.dp.toPx(), crossY),
-            strokeWidth = 2.dp.toPx(),
-        )
-        drawLine(
-            color = Color.White.copy(alpha = 0.35f),
-            start = Offset(crossX, crossY - 18.dp.toPx()),
-            end = Offset(crossX, crossY + 18.dp.toPx()),
-            strokeWidth = 2.dp.toPx(),
+            topLeft = Offset(rect.left, rect.top),
+            size = Size(rect.width, rect.height),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+            style = Stroke(width = 3.dp.toPx()),
         )
     }
 }
