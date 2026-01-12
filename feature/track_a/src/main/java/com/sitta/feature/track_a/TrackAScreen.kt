@@ -231,7 +231,7 @@ fun TrackAScreen(
                     ),
             )
             CameraOverlay(isReady = uiState.captureEnabled)
-            if (BuildConfig.DEBUG) {
+            if (BuildConfig.DEBUG && uiState.debugOverlayEnabled) {
                 LandmarkOverlay(landmarks = uiState.overlayLandmarks)
             }
 

@@ -64,10 +64,6 @@ class TrackBViewModel(
         }
     }
 
-    fun updatePreviewZoom(value: Float) {
-        _uiState.value = _uiState.value.copy(previewZoom = value)
-    }
-
     private suspend fun processEnhancement(bitmap: Bitmap, session: SessionInfo, strength: Float) {
         runCatching {
             val result = enhancementPipeline.enhance(bitmap, strength)
@@ -96,7 +92,6 @@ data class TrackBUiState(
     val steps: List<com.sitta.core.domain.EnhancementStep> = emptyList(),
     val qualityResult: QualityResult? = null,
     val sharpenStrength: Float = 1f,
-    val previewZoom: Float = 1.1f,
     val session: SessionInfo? = null,
     val message: String? = null,
 )

@@ -134,7 +134,15 @@ class TrackScreensTest {
         val context = composeRule.activity
         val settingsRepository = SettingsRepository()
         val sessionRepository = SessionRepository(context, Gson())
-        composeRule.setContent { TrackDScreen(settingsRepository, sessionRepository, onBack = {}) }
+        composeRule.setContent {
+            TrackDScreen(
+                settingsRepository = settingsRepository,
+                sessionRepository = sessionRepository,
+                onBack = {},
+                onToggleTheme = {},
+                isDark = true,
+            )
+        }
         composeRule.onNodeWithText("Liveness Detection").assertExists()
     }
 }

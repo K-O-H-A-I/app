@@ -52,6 +52,8 @@ class TrackAViewModel(
     private var lastLandmarks: List<com.sitta.core.vision.FingerLandmark> = emptyList()
     private var lastLandmarkMillis: Long = 0L
     private var livenessEnabled: Boolean = false
+    private var autoCaptureEnabled: Boolean = true
+    private var debugOverlayEnabled: Boolean = false
     private var lastLivenessResult: LivenessResult? = null
     private var lastReady: Boolean = false
     private var lastCaptureMs: Long = 0L
@@ -67,6 +69,16 @@ class TrackAViewModel(
                     lastLivenessResult = null
                     livenessFrames.clear()
                 }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.autoCaptureEnabled.collect { enabled ->
+                autoCaptureEnabled = enabled
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.debugOverlayEnabled.collect { enabled ->
+                debugOverlayEnabled = enabled
             }
         }
     }
@@ -118,6 +130,7 @@ class TrackAViewModel(
                 detection = detection,
                 centerScore = centerScore,
                 overlayLandmarks = overlayLandmarks,
+                debugOverlayEnabled = debugOverlayEnabled,
                 message = when {
                     livenessEnabled && !livenessPass -> "Liveness failed"
                     !detectionPass -> "No finger detected"
@@ -127,7 +140,7 @@ class TrackAViewModel(
                 },
             )
 
-            if (combinedPass) {
+            if (combinedPass && autoCaptureEnabled) {
                 val canAutoCapture = autoGate.update(true, timestampMillis)
                 if (canAutoCapture && !captureInFlight && timestampMillis - lastCaptureMs > TrackACaptureConfig.autoCaptureCooldownMs) {
                     logBlocker("AUTO_CAPTURE", "Triggered")
@@ -380,6 +393,7 @@ data class TrackAUiState(
     val detection: FingerDetectionResult? = null,
     val centerScore: Int = 0,
     val overlayLandmarks: List<com.sitta.core.vision.FingerLandmark> = emptyList(),
+    val debugOverlayEnabled: Boolean = false,
     val message: String? = null,
     val captureNotice: String? = null,
     val captureSource: CaptureSource? = null,

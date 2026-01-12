@@ -18,7 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material.icons.outlined.AutoAwesomeMotion
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Nightlight
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -57,7 +60,13 @@ class TrackDViewModelFactory(private val settingsRepository: SettingsRepository)
 }
 
 @Composable
-fun TrackDScreen(settingsRepository: SettingsRepository, sessionRepository: SessionRepository, onBack: () -> Unit) {
+fun TrackDScreen(
+    settingsRepository: SettingsRepository,
+    sessionRepository: SessionRepository,
+    onBack: () -> Unit,
+    onToggleTheme: () -> Unit,
+    isDark: Boolean,
+) {
     val viewModel: TrackDViewModel = viewModel(factory = TrackDViewModelFactory(settingsRepository))
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -82,44 +91,45 @@ fun TrackDScreen(settingsRepository: SettingsRepository, sessionRepository: Sess
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF1A1D21), RoundedCornerShape(24.dp))
-                .padding(16.dp),
+        SettingsCard(
+            icon = if (isDark) Icons.Outlined.WbSunny else Icons.Outlined.Nightlight,
+            iconColor = Color(0xFF14B8A6),
+            title = "Dark Mode",
+            subtitle = "Theme appearance",
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(Color(0xFF7C3AED), RoundedCornerShape(16.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.MonitorHeart,
-                        contentDescription = null,
-                        tint = Color.White,
-                    )
-                }
-                Spacer(modifier = Modifier.size(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Liveness Detection", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(text = "Anti-spoofing protection", color = Color(0xFF93A3B5), fontSize = 12.sp)
-                }
-                Switch(
-                    checked = uiState.livenessEnabled,
-                    onCheckedChange = { viewModel.setLivenessEnabled(it) },
-                )
-            }
+            Switch(
+                checked = isDark,
+                onCheckedChange = { onToggleTheme() },
+            )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        Text(
-            text = "When enabled, capture requires motion variance within a mid-band to prevent static spoofing.",
-            color = Color(0xFF7C8A9B),
-            fontSize = 12.sp,
-        )
+        SettingsCard(
+            icon = Icons.Outlined.AutoAwesomeMotion,
+            iconColor = Color(0xFF8B5CF6),
+            title = "Auto Capture",
+            subtitle = "Trigger capture when ready",
+        ) {
+            Switch(
+                checked = uiState.autoCaptureEnabled,
+                onCheckedChange = { viewModel.setAutoCaptureEnabled(it) },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        SettingsCard(
+            icon = Icons.Outlined.BugReport,
+            iconColor = Color(0xFFF97316),
+            title = "Debug Landmarks",
+            subtitle = "Show landmark overlay in capture",
+        ) {
+            Switch(
+                checked = uiState.debugOverlayEnabled,
+                onCheckedChange = { viewModel.setDebugOverlayEnabled(it) },
+            )
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -145,6 +155,43 @@ fun TrackDScreen(settingsRepository: SettingsRepository, sessionRepository: Sess
         exportMessage.value?.let {
             Spacer(modifier = Modifier.height(10.dp))
             Text(text = it, color = Color(0xFF9AA6B2), fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun SettingsCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconColor: Color,
+    title: String,
+    subtitle: String,
+    trailing: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF1A1D21), RoundedCornerShape(24.dp))
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(iconColor, RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                )
+            }
+            Spacer(modifier = Modifier.size(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(text = subtitle, color = Color(0xFF93A3B5), fontSize = 12.sp)
+            }
+            trailing()
         }
     }
 }

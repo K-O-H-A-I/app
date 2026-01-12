@@ -99,19 +99,25 @@ class TrackCViewModel(
             ProbeSource.LIVE -> _uiState.value.liveProbeBitmap to _uiState.value.liveProbeFilename
             ProbeSource.GALLERY -> _uiState.value.galleryProbeBitmap to _uiState.value.galleryProbeFilename
         }
-        val probeBitmap = probe ?: return
         val candidates = _uiState.value.candidates
-        if (candidates.isEmpty()) return
+        val probeBitmap = probe
+        if (probeBitmap == null || candidates.isEmpty()) {
+            _uiState.value = _uiState.value.copy(message = "Select a probe and candidates first")
+            return
+        }
 
         viewModelScope.launch(Dispatchers.Default) {
-            _uiState.value = _uiState.value.copy(isRunning = true)
+            _uiState.value = _uiState.value.copy(isRunning = true, message = null)
             val threshold = configRepo.current().matchThreshold
             val candidateMap = candidates.associate { it.id to it.bitmap }
             val result = matcher.match(probeBitmap, candidateMap, threshold)
+            val confirmed = result.candidates.any { it.decision == "MATCH" }
             _uiState.value = _uiState.value.copy(
                 results = result.candidates,
                 threshold = threshold,
                 isRunning = false,
+                matchConfirmed = confirmed,
+                matchStatus = if (confirmed) "Match Confirmed" else "No Match",
             )
             saveMatchReport(result.candidates, threshold, probeFilename)
         }
@@ -155,6 +161,9 @@ data class TrackCState(
     val threshold: Double = 40.0,
     val isRunning: Boolean = false,
     val pendingLiveCapture: Boolean = false,
+    val matchStatus: String? = null,
+    val matchConfirmed: Boolean = false,
+    val message: String? = null,
 )
 
 enum class ProbeSource { LIVE, GALLERY }

@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -171,7 +172,8 @@ fun TrackCScreen(
             }
             Spacer(modifier = Modifier.height(12.dp))
             ImageBox(
-                bitmap = uiState.liveProbeDisplayBitmap ?: uiState.liveProbeBitmap,
+                bitmap = uiState.liveProbeBitmap,
+                overlay = uiState.liveProbeDisplayBitmap,
                 label = "LIVE",
                 badge = if (uiState.activeProbeSource == ProbeSource.LIVE) "ACTIVE" else null,
             )
@@ -209,7 +211,8 @@ fun TrackCScreen(
             }
             Spacer(modifier = Modifier.height(12.dp))
             ImageBox(
-                bitmap = uiState.galleryProbeDisplayBitmap ?: uiState.galleryProbeBitmap,
+                bitmap = uiState.galleryProbeBitmap,
+                overlay = uiState.galleryProbeDisplayBitmap,
                 label = "GALLERY",
                 badge = if (uiState.activeProbeSource == ProbeSource.GALLERY) "ACTIVE" else null,
             )
@@ -231,11 +234,12 @@ fun TrackCScreen(
             Spacer(modifier = Modifier.height(12.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(uiState.candidates) { candidate ->
-                    CandidateTile(
-                        id = candidate.id,
-                        bitmap = candidate.displayBitmap,
-                        highlighted = bestMatch?.candidateId == candidate.id,
-                    )
+                CandidateTile(
+                    id = candidate.id,
+                    bitmap = candidate.bitmap,
+                    overlay = candidate.displayBitmap,
+                    highlighted = bestMatch?.candidateId == candidate.id,
+                )
                 }
             }
         }
@@ -304,6 +308,13 @@ fun TrackCScreen(
                     ResultRow(id = result.candidateId, score = result.score, decision = result.decision)
                 }
             }
+        } else if (uiState.matchStatus != null) {
+            val statusText = uiState.matchStatus ?: ""
+            DarkCard {
+                Text(text = "Comparison Result", color = Color(0xFF93A3B5), fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                MatchStatusPill(text = statusText, isMatch = uiState.matchConfirmed)
+            }
         }
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -321,6 +332,10 @@ fun TrackCScreen(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
+        }
+        uiState.message?.let { message ->
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(text = message, color = Color(0xFFFBBF24), fontSize = 12.sp)
         }
     }
 }
@@ -342,7 +357,12 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun ImageBox(bitmap: android.graphics.Bitmap?, label: String, badge: String? = null) {
+private fun ImageBox(
+    bitmap: android.graphics.Bitmap?,
+    overlay: android.graphics.Bitmap?,
+    label: String,
+    badge: String? = null,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -362,7 +382,21 @@ private fun ImageBox(bitmap: android.graphics.Bitmap?, label: String, badge: Str
                     ),
             )
         } else {
-            Image(bitmap = bitmap.asImageBitmap(), contentDescription = label, modifier = Modifier.matchParentSize())
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = label,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        if (overlay != null) {
+            Image(
+                bitmap = overlay.asImageBitmap(),
+                contentDescription = "$label overlay",
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.85f,
+            )
         }
         badge?.let {
             Box(
@@ -379,7 +413,12 @@ private fun ImageBox(bitmap: android.graphics.Bitmap?, label: String, badge: Str
 }
 
 @Composable
-private fun CandidateTile(id: String, bitmap: android.graphics.Bitmap, highlighted: Boolean) {
+private fun CandidateTile(
+    id: String,
+    bitmap: android.graphics.Bitmap,
+    overlay: android.graphics.Bitmap?,
+    highlighted: Boolean,
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
@@ -387,7 +426,21 @@ private fun CandidateTile(id: String, bitmap: android.graphics.Bitmap, highlight
                 .background(if (highlighted) Color(0xFF0F3F3A) else Color(0xFF13161B), RoundedCornerShape(16.dp))
                 .padding(6.dp),
         ) {
-            Image(bitmap = bitmap.asImageBitmap(), contentDescription = id, modifier = Modifier.matchParentSize())
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = id,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+            )
+            if (overlay != null) {
+                Image(
+                    bitmap = overlay.asImageBitmap(),
+                    contentDescription = "$id overlay",
+                    modifier = Modifier.matchParentSize(),
+                    contentScale = ContentScale.Crop,
+                    alpha = 0.85f,
+                )
+            }
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = id.take(6), color = Color(0xFF9AA6B2), fontSize = 11.sp)

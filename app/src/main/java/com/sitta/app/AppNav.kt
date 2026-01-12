@@ -19,6 +19,7 @@ fun SittaApp(container: AppContainer) {
             TrackSelectorScreen(
                 authManager = container.authManager,
                 sessionRepository = container.sessionRepository,
+                settingsRepository = container.settingsRepository,
                 onTrackA = { navController.navigate("trackA") },
                 onTrackB = { navController.navigate("trackB") },
                 onTrackC = { navController.navigate("trackC") },
@@ -76,6 +77,8 @@ fun SittaApp(container: AppContainer) {
                 settingsRepository = container.settingsRepository,
                 sessionRepository = container.sessionRepository,
                 onBack = { navController.popBackStack() },
+                onToggleTheme = { container.themeManager.toggle() },
+                isDark = container.themeManager.isDark.value,
             )
         }
     }

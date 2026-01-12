@@ -22,12 +22,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.CompareArrows
 import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Nightlight
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.sitta.core.common.ArtifactFilenames
 import com.sitta.core.common.SessionInfo
 import com.sitta.core.data.AuthManager
+import com.sitta.core.data.SettingsRepository
 import com.sitta.core.data.SessionRepository
 import java.time.Instant
 import java.time.LocalDate
@@ -50,6 +53,7 @@ import java.time.ZoneId
 fun TrackSelectorScreen(
     authManager: AuthManager,
     sessionRepository: SessionRepository,
+    settingsRepository: SettingsRepository,
     onTrackA: () -> Unit,
     onTrackB: () -> Unit,
     onTrackC: () -> Unit,
@@ -58,6 +62,7 @@ fun TrackSelectorScreen(
     isDark: Boolean,
 ) {
     val activeTenant by authManager.activeTenant.collectAsState()
+    val livenessEnabled by settingsRepository.livenessEnabled.collectAsState()
     val background = if (isDark) Color(0xFF121212) else Color(0xFFF7F7F7)
     val surface = if (isDark) Color(0xFF1E1E1E) else Color.White
     val sessions = sessionRepository.listSessions(activeTenant.id)
@@ -180,6 +185,50 @@ fun TrackSelectorScreen(
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
             TrackCard(item = cards[2], surface = surface, isDark = isDark, modifier = Modifier.weight(1f))
             TrackCard(item = cards[3], surface = surface, isDark = isDark, modifier = Modifier.weight(1f))
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Card(
+            colors = CardDefaults.cardColors(containerColor = surface),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .background(Color(0xFF7C3AED), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = Icons.Outlined.MonitorHeart,
+                        contentDescription = null,
+                        tint = Color.White,
+                    )
+                }
+                Spacer(modifier = Modifier.size(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Liveness Detection",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (isDark) Color.White else Color(0xFF111111),
+                    )
+                    Text(
+                        text = "Anti-spoofing protection",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280),
+                    )
+                }
+                Switch(
+                    checked = livenessEnabled,
+                    onCheckedChange = { settingsRepository.setLivenessEnabled(it) },
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))

@@ -14,17 +14,27 @@ class TrackDViewModel(private val settingsRepository: SettingsRepository) : View
 
     init {
         viewModelScope.launch {
-            settingsRepository.livenessEnabled.collect { enabled ->
-                _uiState.value = _uiState.value.copy(livenessEnabled = enabled)
+            settingsRepository.autoCaptureEnabled.collect { enabled ->
+                _uiState.value = _uiState.value.copy(autoCaptureEnabled = enabled)
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.debugOverlayEnabled.collect { enabled ->
+                _uiState.value = _uiState.value.copy(debugOverlayEnabled = enabled)
             }
         }
     }
 
-    fun setLivenessEnabled(enabled: Boolean) {
-        settingsRepository.setLivenessEnabled(enabled)
+    fun setAutoCaptureEnabled(enabled: Boolean) {
+        settingsRepository.setAutoCaptureEnabled(enabled)
+    }
+
+    fun setDebugOverlayEnabled(enabled: Boolean) {
+        settingsRepository.setDebugOverlayEnabled(enabled)
     }
 }
 
 data class TrackDState(
-    val livenessEnabled: Boolean = false,
+    val autoCaptureEnabled: Boolean = true,
+    val debugOverlayEnabled: Boolean = false,
 )
