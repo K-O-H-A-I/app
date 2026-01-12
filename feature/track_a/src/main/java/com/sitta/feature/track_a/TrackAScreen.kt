@@ -131,6 +131,9 @@ fun TrackAScreen(
 
     LaunchedEffect(uiState.lastSessionId) {
         if (uiState.lastSessionId != null) {
+            if (uiState.captureSource == CaptureSource.AUTO) {
+                kotlinx.coroutines.delay(350L)
+            }
             onCaptureComplete()
         }
     }
@@ -152,10 +155,15 @@ fun TrackAScreen(
         val executor = ContextCompat.getMainExecutor(context)
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().apply {
+            val preview = Preview.Builder()
+                .setTargetRotation(previewView.display.rotation)
+                .build()
+                .apply {
                 setSurfaceProvider(previewView.surfaceProvider)
             }
             val analysis = ImageAnalysis.Builder()
+                .setTargetRotation(previewView.display.rotation)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
             analysis.setAnalyzer(analysisExecutor) { imageProxy ->
@@ -224,7 +232,7 @@ fun TrackAScreen(
             )
             CameraOverlay(isReady = uiState.captureEnabled)
             if (BuildConfig.DEBUG) {
-                LandmarkOverlay(landmarks = uiState.detection?.landmarks.orEmpty())
+                LandmarkOverlay(landmarks = uiState.overlayLandmarks)
             }
 
             Column(
@@ -261,7 +269,7 @@ fun TrackAScreen(
 
                 StatusBanner(
                     isReady = uiState.captureEnabled,
-                    message = uiState.message,
+                    message = uiState.captureNotice ?: uiState.message,
                 )
 
                 BottomCaptureBar(
@@ -319,10 +327,10 @@ private fun RoundIconButton(
 @Composable
 private fun CameraOverlay(isReady: Boolean) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val guideWidth = (size.width * 0.78f).coerceIn(size.width * 0.65f, size.width * 0.85f)
-        val guideHeight = (size.height * 0.22f).coerceIn(size.height * 0.18f, size.height * 0.28f)
-        val left = (size.width - guideWidth) / 2f
-        val top = ((size.height - guideHeight) / 2f) - size.height * 0.08f
+        val guideWidth = (size.width * 0.62f).coerceIn(size.width * 0.55f, size.width * 0.75f)
+        val guideHeight = (size.height * 0.68f).coerceIn(size.height * 0.58f, size.height * 0.78f)
+        val left = 0f
+        val top = ((size.height - guideHeight) / 2f) + size.height * 0.08f
         val safeTop = top.coerceAtLeast(0f)
         val rect = androidx.compose.ui.geometry.Rect(left, safeTop, left + guideWidth, safeTop + guideHeight)
         val radius = (minOf(guideWidth, guideHeight) * 0.28f).coerceAtLeast(18.dp.toPx())
@@ -462,25 +470,54 @@ private fun StatusChip(label: String, score: Int, pass: Boolean) {
 private fun LandmarkOverlay(landmarks: List<com.sitta.core.vision.FingerLandmark>) {
     if (landmarks.isEmpty()) return
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val pairs = listOf(
-            com.sitta.core.vision.LandmarkType.INDEX_DIP to com.sitta.core.vision.LandmarkType.INDEX_TIP,
-            com.sitta.core.vision.LandmarkType.MIDDLE_DIP to com.sitta.core.vision.LandmarkType.MIDDLE_TIP,
-            com.sitta.core.vision.LandmarkType.RING_DIP to com.sitta.core.vision.LandmarkType.RING_TIP,
-            com.sitta.core.vision.LandmarkType.PINKY_DIP to com.sitta.core.vision.LandmarkType.PINKY_TIP,
+        val chains = listOf(
+            listOf(
+                com.sitta.core.vision.LandmarkType.THUMB_CMC,
+                com.sitta.core.vision.LandmarkType.THUMB_MCP,
+                com.sitta.core.vision.LandmarkType.THUMB_IP,
+                com.sitta.core.vision.LandmarkType.THUMB_TIP,
+            ),
+            listOf(
+                com.sitta.core.vision.LandmarkType.INDEX_MCP,
+                com.sitta.core.vision.LandmarkType.INDEX_PIP,
+                com.sitta.core.vision.LandmarkType.INDEX_DIP,
+                com.sitta.core.vision.LandmarkType.INDEX_TIP,
+            ),
+            listOf(
+                com.sitta.core.vision.LandmarkType.MIDDLE_MCP,
+                com.sitta.core.vision.LandmarkType.MIDDLE_PIP,
+                com.sitta.core.vision.LandmarkType.MIDDLE_DIP,
+                com.sitta.core.vision.LandmarkType.MIDDLE_TIP,
+            ),
+            listOf(
+                com.sitta.core.vision.LandmarkType.RING_MCP,
+                com.sitta.core.vision.LandmarkType.RING_PIP,
+                com.sitta.core.vision.LandmarkType.RING_DIP,
+                com.sitta.core.vision.LandmarkType.RING_TIP,
+            ),
+            listOf(
+                com.sitta.core.vision.LandmarkType.PINKY_MCP,
+                com.sitta.core.vision.LandmarkType.PINKY_PIP,
+                com.sitta.core.vision.LandmarkType.PINKY_DIP,
+                com.sitta.core.vision.LandmarkType.PINKY_TIP,
+            ),
         )
-        pairs.forEach { (dipType, tipType) ->
-            val dip = landmarks.firstOrNull { it.type == dipType }
-            val tip = landmarks.firstOrNull { it.type == tipType }
-            if (dip != null && tip != null) {
-                val dipPt = Offset(dip.x * size.width, dip.y * size.height)
-                val tipPt = Offset(tip.x * size.width, tip.y * size.height)
+        chains.forEach { chain ->
+            val points = chain.mapNotNull { type ->
+                landmarks.firstOrNull { it.type == type }?.let {
+                    Offset(it.x * size.width, it.y * size.height)
+                }
+            }
+            for (i in 0 until points.size - 1) {
                 drawLine(
                     color = Color(0xFF38D39F),
-                    start = dipPt,
-                    end = tipPt,
+                    start = points[i],
+                    end = points[i + 1],
                     strokeWidth = 2.dp.toPx(),
                 )
-                drawCircle(Color(0xFF38D39F), radius = 4.dp.toPx(), center = tipPt)
+            }
+            points.forEach { pt ->
+                drawCircle(Color(0xFF38D39F), radius = 3.5.dp.toPx(), center = pt)
             }
         }
     }

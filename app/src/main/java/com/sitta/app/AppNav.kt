@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.sitta.feature.track_a.TrackAScreen
 import com.sitta.feature.track_b.TrackBScreen
 import com.sitta.feature.track_c.TrackCScreen
@@ -26,7 +27,11 @@ fun SittaApp(container: AppContainer) {
                 isDark = container.themeManager.isDark.value,
             )
         }
-        composable("trackA") {
+        composable(
+            "trackA?origin={origin}",
+            arguments = listOf(navArgument("origin") { defaultValue = "enhance" }),
+        ) { entry ->
+            val origin = entry.arguments?.getString("origin") ?: "enhance"
             TrackAScreen(
                 sessionRepository = container.sessionRepository,
                 authManager = container.authManager,
@@ -36,7 +41,13 @@ fun SittaApp(container: AppContainer) {
                 fingerDetector = container.fingerDetector,
                 fingerSceneAnalyzer = container.fingerSceneAnalyzer,
                 fingerMasker = container.fingerMasker,
-                onCaptureComplete = { navController.navigate("trackB") },
+                onCaptureComplete = {
+                    if (origin == "match") {
+                        navController.popBackStack("trackC", inclusive = false)
+                    } else {
+                        navController.navigate("trackB")
+                    }
+                },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -46,7 +57,7 @@ fun SittaApp(container: AppContainer) {
                 authManager = container.authManager,
                 enhancementPipeline = container.enhancementPipeline,
                 qualityAnalyzer = container.qualityAnalyzer,
-                onBack = { navController.popBackStack() },
+                onBack = { navController.popBackStack("home", inclusive = false) },
             )
         }
         composable("trackC") {
@@ -55,13 +66,15 @@ fun SittaApp(container: AppContainer) {
                 authManager = container.authManager,
                 configRepo = container.configRepo,
                 matcher = container.matcher,
+                skeletonizer = container.fingerSkeletonizer,
                 onBack = { navController.popBackStack() },
-                onLiveCapture = { navController.navigate("trackA") },
+                onLiveCapture = { navController.navigate("trackA?origin=match") },
             )
         }
         composable("trackD") {
             TrackDScreen(
                 settingsRepository = container.settingsRepository,
+                sessionRepository = container.sessionRepository,
                 onBack = { navController.popBackStack() },
             )
         }

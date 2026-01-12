@@ -24,9 +24,9 @@ class FingerDetector(private val context: Context) {
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.IMAGE)
                 .setNumHands(1)
-                .setMinHandDetectionConfidence(0.5f)
-                .setMinHandPresenceConfidence(0.5f)
-                .setMinTrackingConfidence(0.5f)
+                .setMinHandDetectionConfidence(0.45f)
+                .setMinHandPresenceConfidence(0.45f)
+                .setMinTrackingConfidence(0.45f)
                 .build()
             handLandmarker = HandLandmarker.createFromOptions(context, options)
             isInitialized = true

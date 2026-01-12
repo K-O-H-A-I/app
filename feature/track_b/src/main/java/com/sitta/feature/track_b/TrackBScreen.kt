@@ -37,9 +37,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.BackHandler
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -75,6 +78,8 @@ fun TrackBScreen(
         factory = TrackBViewModelFactory(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer),
     )
     val uiState by viewModel.uiState.collectAsState()
+
+    BackHandler { onBack() }
 
     Column(
         modifier = Modifier
@@ -112,8 +117,8 @@ fun TrackBScreen(
             }
             Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ImagePane(title = "RAW", bitmap = uiState.rawBitmap, modifier = Modifier.weight(1f))
-                ImagePane(title = "ENHANCED", bitmap = uiState.enhancedBitmap, modifier = Modifier.weight(1f))
+                ImagePane(title = "RAW", bitmap = uiState.rawBitmap, modifier = Modifier.weight(1f), zoom = 1f)
+                ImagePane(title = "ENHANCED", bitmap = uiState.enhancedBitmap, modifier = Modifier.weight(1f), zoom = uiState.previewZoom)
             }
         }
 
@@ -140,6 +145,14 @@ fun TrackBScreen(
                 value = uiState.sharpenStrength,
                 onValueChange = { viewModel.updateSharpenStrength(it) },
                 valueRange = 0f..2f,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(text = "Preview Zoom", color = Color(0xFF93A3B5), fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(6.dp))
+            Slider(
+                value = uiState.previewZoom,
+                onValueChange = { viewModel.updatePreviewZoom(it) },
+                valueRange = 1f..1.8f,
             )
         }
 
@@ -233,7 +246,7 @@ private fun SectionTitle(text: String, trailingLabel: String? = null) {
 }
 
 @Composable
-private fun ImagePane(title: String, bitmap: android.graphics.Bitmap?, modifier: Modifier = Modifier) {
+private fun ImagePane(title: String, bitmap: android.graphics.Bitmap?, modifier: Modifier = Modifier, zoom: Float) {
     Box(
         modifier = modifier
             .height(160.dp)
@@ -254,7 +267,13 @@ private fun ImagePane(title: String, bitmap: android.graphics.Bitmap?, modifier:
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = title,
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        scaleX = zoom
+                        scaleY = zoom
+                    },
+                contentScale = ContentScale.Crop,
             )
         }
         Box(

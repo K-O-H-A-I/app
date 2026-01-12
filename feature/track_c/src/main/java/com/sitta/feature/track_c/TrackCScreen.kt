@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -54,6 +55,7 @@ import com.sitta.core.data.AuthManager
 import com.sitta.core.data.ConfigRepo
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.domain.Matcher
+import com.sitta.core.vision.FingerSkeletonizer
 import java.util.UUID
 
 class TrackCViewModelFactory(
@@ -61,11 +63,12 @@ class TrackCViewModelFactory(
     private val authManager: AuthManager,
     private val configRepo: ConfigRepo,
     private val matcher: Matcher,
+    private val skeletonizer: FingerSkeletonizer,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TrackCViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TrackCViewModel(sessionRepository, authManager, configRepo, matcher) as T
+            return TrackCViewModel(sessionRepository, authManager, configRepo, matcher, skeletonizer) as T
         }
         error("Unknown ViewModel class")
     }
@@ -77,21 +80,28 @@ fun TrackCScreen(
     authManager: AuthManager,
     configRepo: ConfigRepo,
     matcher: Matcher,
+    skeletonizer: FingerSkeletonizer,
     onBack: () -> Unit,
     onLiveCapture: () -> Unit,
 ) {
     val context = LocalContext.current
     val viewModel: TrackCViewModel = viewModel(
-        factory = TrackCViewModelFactory(sessionRepository, authManager, configRepo, matcher),
+        factory = TrackCViewModelFactory(sessionRepository, authManager, configRepo, matcher, skeletonizer),
     )
     val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(uiState.pendingLiveCapture) {
+        if (uiState.pendingLiveCapture) {
+            viewModel.resolveLiveCaptureIfPending()
+        }
+    }
 
     val probePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             context.contentResolver.openInputStream(it)?.use { stream ->
                 val bitmap = BitmapFactory.decodeStream(stream)
                 if (bitmap != null) {
-                    viewModel.setProbe(bitmap, it.lastPathSegment ?: "probe.png")
+                    viewModel.setGalleryProbe(bitmap, it.lastPathSegment ?: "probe.png")
                 }
             }
         }
@@ -142,40 +152,91 @@ fun TrackCScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "", color = Color(0xFF93A3B5), fontSize = 12.sp)
-                ActionPill(text = "Live Capture", onClick = onLiveCapture)
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            ImageBox(bitmap = uiState.probeBitmap, label = "PROBE")
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ActionPill(text = "Use Last", onClick = {
-                    val tenantId = authManager.activeTenant.value.id
-                    val session = sessionRepository.loadLastSession(tenantId) ?: return@ActionPill
-                    val probeFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
-                        ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
-                        ?: return@ActionPill
-                    val bitmap = BitmapFactory.decodeFile(probeFile.absolutePath)
-                    if (bitmap != null) {
-                        viewModel.setProbe(bitmap, probeFile.name)
+                Text(text = "Live Capture", color = Color(0xFF93A3B5), fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionPill(
+                        text = "Capture",
+                        onClick = {
+                            viewModel.markLiveCapturePending()
+                            onLiveCapture()
+                        },
+                    )
+                    if (uiState.liveProbeBitmap != null) {
+                        ActionPill(
+                            text = if (uiState.activeProbeSource == ProbeSource.LIVE) "Active" else "Use Live",
+                            onClick = { viewModel.setActiveProbeSource(ProbeSource.LIVE) },
+                        )
                     }
-                })
-                ActionPill(text = "Pick Photo", onClick = { probePicker.launch("image/*") })
-                ActionPill(text = "Add Candidates", onClick = { candidatePicker.launch(arrayOf("image/*")) })
+                }
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            ImageBox(
+                bitmap = uiState.liveProbeDisplayBitmap ?: uiState.liveProbeBitmap,
+                label = "LIVE",
+                badge = if (uiState.activeProbeSource == ProbeSource.LIVE) "ACTIVE" else null,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        DarkCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Gallery / Last", color = Color(0xFF93A3B5), fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ActionPill(text = "Use Last", onClick = {
+                        val tenantId = authManager.activeTenant.value.id
+                        val session = sessionRepository.loadLastSession(tenantId) ?: return@ActionPill
+                        val probeFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
+                            ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
+                            ?: return@ActionPill
+                        val bitmap = BitmapFactory.decodeFile(probeFile.absolutePath)
+                        if (bitmap != null) {
+                            viewModel.setGalleryProbe(bitmap, probeFile.name)
+                        }
+                    })
+                    ActionPill(text = "Pick Photo", onClick = { probePicker.launch("image/*") })
+                    if (uiState.galleryProbeBitmap != null) {
+                        ActionPill(
+                            text = if (uiState.activeProbeSource == ProbeSource.GALLERY) "Active" else "Use Photo",
+                            onClick = { viewModel.setActiveProbeSource(ProbeSource.GALLERY) },
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            ImageBox(
+                bitmap = uiState.galleryProbeDisplayBitmap ?: uiState.galleryProbeBitmap,
+                label = "GALLERY",
+                badge = if (uiState.activeProbeSource == ProbeSource.GALLERY) "ACTIVE" else null,
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        SectionTitle(text = "Gallery Database (${uiState.candidates.size})")
+        SectionTitle(text = "Candidates (${uiState.candidates.size})")
         Spacer(modifier = Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(uiState.candidates) { candidate ->
-                CandidateTile(
-                    id = candidate.id,
-                    bitmap = candidate.bitmap,
-                    highlighted = bestMatch?.candidateId == candidate.id,
-                )
+        DarkCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "Gallery", color = Color(0xFF93A3B5), fontSize = 12.sp)
+                ActionPill(text = "Add Candidates", onClick = { candidatePicker.launch(arrayOf("image/*")) })
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(uiState.candidates) { candidate ->
+                    CandidateTile(
+                        id = candidate.id,
+                        bitmap = candidate.displayBitmap,
+                        highlighted = bestMatch?.candidateId == candidate.id,
+                    )
+                }
             }
         }
 
@@ -281,7 +342,7 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun ImageBox(bitmap: android.graphics.Bitmap?, label: String) {
+private fun ImageBox(bitmap: android.graphics.Bitmap?, label: String, badge: String? = null) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -302,6 +363,17 @@ private fun ImageBox(bitmap: android.graphics.Bitmap?, label: String) {
             )
         } else {
             Image(bitmap = bitmap.asImageBitmap(), contentDescription = label, modifier = Modifier.matchParentSize())
+        }
+        badge?.let {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .background(Color(0xFF123529), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(text = it, color = Color(0xFF34D399), fontSize = 11.sp)
+            }
         }
     }
 }

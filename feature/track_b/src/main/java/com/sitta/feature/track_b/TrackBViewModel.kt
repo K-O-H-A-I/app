@@ -64,20 +64,29 @@ class TrackBViewModel(
         }
     }
 
+    fun updatePreviewZoom(value: Float) {
+        _uiState.value = _uiState.value.copy(previewZoom = value)
+    }
+
     private suspend fun processEnhancement(bitmap: Bitmap, session: SessionInfo, strength: Float) {
-        val result = enhancementPipeline.enhance(bitmap, strength)
-        val t0 = System.nanoTime()
-        val quality = qualityAnalyzer.analyze(
-            result.bitmap,
-            android.graphics.Rect(0, 0, result.bitmap.width, result.bitmap.height),
-        )
-        val qualityMs = ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1)
-        _uiState.value = _uiState.value.copy(
-            enhancedBitmap = result.bitmap,
-            steps = result.steps + com.sitta.core.domain.EnhancementStep("Quality Check", qualityMs),
-            qualityResult = quality,
-        )
-        sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, result.bitmap)
+        runCatching {
+            val result = enhancementPipeline.enhance(bitmap, strength)
+            val t0 = System.nanoTime()
+            val quality = qualityAnalyzer.analyze(
+                result.bitmap,
+                android.graphics.Rect(0, 0, result.bitmap.width, result.bitmap.height),
+            )
+            val qualityMs = ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1)
+            _uiState.value = _uiState.value.copy(
+                enhancedBitmap = result.bitmap,
+                steps = result.steps + com.sitta.core.domain.EnhancementStep("Quality Check", qualityMs),
+                qualityResult = quality,
+                message = null,
+            )
+            sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, result.bitmap)
+        }.onFailure {
+            _uiState.value = _uiState.value.copy(message = "Enhancement failed: ${it.message}")
+        }
     }
 }
 
@@ -87,6 +96,7 @@ data class TrackBUiState(
     val steps: List<com.sitta.core.domain.EnhancementStep> = emptyList(),
     val qualityResult: QualityResult? = null,
     val sharpenStrength: Float = 1f,
+    val previewZoom: Float = 1.1f,
     val session: SessionInfo? = null,
     val message: String? = null,
 )

@@ -122,16 +122,19 @@ class TrackScreensTest {
                 threshold: Double,
             ) = com.sitta.core.domain.MatchResult(threshold, emptyList())
         }
+        val skeletonizer = com.sitta.core.vision.FingerSkeletonizer()
         composeRule.setContent {
-            TrackCScreen(sessionRepository, authManager, configRepo, matcher, onBack = {}, onLiveCapture = {})
+            TrackCScreen(sessionRepository, authManager, configRepo, matcher, skeletonizer, onBack = {}, onLiveCapture = {})
         }
         composeRule.onNodeWithText("Run Comparison").assertExists()
     }
 
     @Test
     fun trackD_toggleVisible() {
+        val context = composeRule.activity
         val settingsRepository = SettingsRepository()
-        composeRule.setContent { TrackDScreen(settingsRepository, onBack = {}) }
+        val sessionRepository = SessionRepository(context, Gson())
+        composeRule.setContent { TrackDScreen(settingsRepository, sessionRepository, onBack = {}) }
         composeRule.onNodeWithText("Liveness Detection").assertExists()
     }
 }

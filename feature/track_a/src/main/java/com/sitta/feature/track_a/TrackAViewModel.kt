@@ -49,11 +49,14 @@ class TrackAViewModel(
     private var latestRoi: Rect? = null
     private var latestDetection: FingerDetectionResult? = null
     private var lastDetectionMillis: Long = 0L
+    private var lastLandmarks: List<com.sitta.core.vision.FingerLandmark> = emptyList()
+    private var lastLandmarkMillis: Long = 0L
     private var livenessEnabled: Boolean = false
     private var lastLivenessResult: LivenessResult? = null
     private var lastReady: Boolean = false
     private var lastCaptureMs: Long = 0L
     private var captureInFlight: Boolean = false
+    private var lastCaptureSource: CaptureSource? = null
 
     init {
         fingerDetector.initialize()
@@ -74,6 +77,7 @@ class TrackAViewModel(
             val detection = runDetection(bitmap, timestampMillis)
             latestRoi = roi
             latestDetection = detection
+            val overlayLandmarks = resolveOverlayLandmarks(detection, timestampMillis)
 
             val effectiveRoi = roi
             var result = qualityAnalyzer.analyze(bitmap, effectiveRoi, timestampMillis)
@@ -83,7 +87,7 @@ class TrackAViewModel(
             val clutterPass = !scene.cluttered
 
             val detectionStable = detectionGate.update(detectionPass && clutterPass, timestampMillis)
-            val centerScore = computeCenterScore(detection.boundingBox, effectiveRoi, bitmap.width, bitmap.height)
+            val centerScore = computeCenterScore(detection, effectiveRoi, bitmap.width, bitmap.height)
             val centerValid = centerScore > 0
             val qualityScore = result.score0To100
             val coverage = result.metrics.coverageRatio
@@ -113,6 +117,7 @@ class TrackAViewModel(
                 livenessResult = lastLivenessResult,
                 detection = detection,
                 centerScore = centerScore,
+                overlayLandmarks = overlayLandmarks,
                 message = when {
                     livenessEnabled && !livenessPass -> "Liveness failed"
                     !detectionPass -> "No finger detected"
@@ -126,7 +131,7 @@ class TrackAViewModel(
                 val canAutoCapture = autoGate.update(true, timestampMillis)
                 if (canAutoCapture && !captureInFlight && timestampMillis - lastCaptureMs > TrackACaptureConfig.autoCaptureCooldownMs) {
                     logBlocker("AUTO_CAPTURE", "Triggered")
-                    captureInternal()
+                    captureInternal(CaptureSource.AUTO)
                 }
             } else {
                 autoGate.update(false, timestampMillis)
@@ -148,7 +153,7 @@ class TrackAViewModel(
     }
 
     fun capture() {
-        captureInternal()
+        captureInternal(CaptureSource.MANUAL)
     }
 
     fun captureFromBitmap(bitmap: Bitmap) {
@@ -213,7 +218,22 @@ class TrackAViewModel(
         }
     }
 
-    private fun captureInternal() {
+    private fun resolveOverlayLandmarks(
+        detection: FingerDetectionResult,
+        timestampMillis: Long,
+    ): List<com.sitta.core.vision.FingerLandmark> {
+        return if (detection.isDetected && detection.landmarks.isNotEmpty()) {
+            lastLandmarks = detection.landmarks
+            lastLandmarkMillis = timestampMillis
+            detection.landmarks
+        } else if (timestampMillis - lastLandmarkMillis <= 320L) {
+            lastLandmarks
+        } else {
+            emptyList()
+        }
+    }
+
+    private fun captureInternal(source: CaptureSource) {
         if (captureInFlight) return
         val frame = latestFrame ?: return
         val roi = latestRoi ?: return
@@ -222,6 +242,13 @@ class TrackAViewModel(
         val detection = latestDetection
         captureInFlight = true
         lastCaptureMs = System.currentTimeMillis()
+        lastCaptureSource = source
+        val notice = if (source == CaptureSource.AUTO) "Auto captured" else "Captured"
+        _uiState.value = _uiState.value.copy(captureNotice = notice, captureSource = source)
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1200L)
+            _uiState.value = _uiState.value.copy(captureNotice = null)
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -308,14 +335,33 @@ class TrackAViewModel(
     }
 
     private fun computeCenterScore(
-        boundingBox: android.graphics.RectF?,
+        detection: FingerDetectionResult,
         roi: Rect,
         width: Int,
         height: Int,
     ): Int {
-        if (boundingBox == null) return 0
-        val boxCenterX = (boundingBox.left + boundingBox.right) / 2f * width
-        val boxCenterY = (boundingBox.top + boundingBox.bottom) / 2f * height
+        val tipPoints = detection.landmarks.filter {
+            it.type in listOf(
+                com.sitta.core.vision.LandmarkType.INDEX_TIP,
+                com.sitta.core.vision.LandmarkType.MIDDLE_TIP,
+                com.sitta.core.vision.LandmarkType.RING_TIP,
+                com.sitta.core.vision.LandmarkType.PINKY_TIP,
+            )
+        }
+        val center = if (tipPoints.isNotEmpty()) {
+            val avgX = tipPoints.map { it.x }.average().toFloat() * width
+            val avgY = tipPoints.map { it.y }.average().toFloat() * height
+            Pair(avgX, avgY)
+        } else {
+            val boundingBox = detection.boundingBox
+            if (boundingBox == null) return 0
+            Pair(
+                (boundingBox.left + boundingBox.right) / 2f * width,
+                (boundingBox.top + boundingBox.bottom) / 2f * height,
+            )
+        }
+        val boxCenterX = center.first
+        val boxCenterY = center.second
         val roiCenterX = roi.exactCenterX()
         val roiCenterY = roi.exactCenterY()
         val dx = (boxCenterX - roiCenterX) / roi.width()
@@ -333,6 +379,11 @@ data class TrackAUiState(
     val livenessResult: LivenessResult? = null,
     val detection: FingerDetectionResult? = null,
     val centerScore: Int = 0,
+    val overlayLandmarks: List<com.sitta.core.vision.FingerLandmark> = emptyList(),
     val message: String? = null,
+    val captureNotice: String? = null,
+    val captureSource: CaptureSource? = null,
     val lastSessionId: String? = null,
 )
+
+enum class CaptureSource { MANUAL, AUTO }

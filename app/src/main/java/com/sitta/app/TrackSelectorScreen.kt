@@ -284,7 +284,6 @@ private fun ActivityRow(title: String, time: String) {
             Text(text = title, style = MaterialTheme.typography.bodyMedium)
             Text(text = time, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
-        Text(text = ">", color = Color(0xFF6B7280))
     }
 }
 

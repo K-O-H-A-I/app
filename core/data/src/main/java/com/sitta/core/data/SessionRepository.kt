@@ -20,6 +20,8 @@ class SessionRepository(
 
     private fun tenantRoot(tenantId: String): File = File(sessionsRoot(), tenantId)
 
+    fun sessionsRootDir(): File = sessionsRoot()
+
     fun createSession(tenantId: String): AppResult<SessionInfo> {
         return runCatching {
             val sessionId = UUID.randomUUID().toString()

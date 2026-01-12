@@ -19,22 +19,32 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.MonitorHeart
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sitta.core.data.SessionExporter
+import com.sitta.core.data.SessionRepository
 import com.sitta.core.data.SettingsRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class TrackDViewModelFactory(private val settingsRepository: SettingsRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -47,9 +57,12 @@ class TrackDViewModelFactory(private val settingsRepository: SettingsRepository)
 }
 
 @Composable
-fun TrackDScreen(settingsRepository: SettingsRepository, onBack: () -> Unit) {
+fun TrackDScreen(settingsRepository: SettingsRepository, sessionRepository: SessionRepository, onBack: () -> Unit) {
     val viewModel: TrackDViewModel = viewModel(factory = TrackDViewModelFactory(settingsRepository))
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val exportMessage = remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -107,6 +120,32 @@ fun TrackDScreen(settingsRepository: SettingsRepository, onBack: () -> Unit) {
             color = Color(0xFF7C8A9B),
             fontSize = 12.sp,
         )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = {
+                scope.launch(Dispatchers.IO) {
+                    val exporter = SessionExporter(context)
+                    val result = exporter.exportAllSessions(sessionRepository.sessionsRootDir())
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        exportMessage.value = when (result) {
+                            is com.sitta.core.common.AppResult.Success -> "Exported to: ${result.value.absolutePath}"
+                            is com.sitta.core.common.AppResult.Error -> "Export failed: ${result.message}"
+                        }
+                    }
+                }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14B8A6)),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Text(text = "Export Sessions", color = Color.White)
+        }
+
+        exportMessage.value?.let {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(text = it, color = Color(0xFF9AA6B2), fontSize = 12.sp)
+        }
     }
 }
 

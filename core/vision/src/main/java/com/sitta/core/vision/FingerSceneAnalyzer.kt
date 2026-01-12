@@ -35,7 +35,7 @@ class FingerSceneAnalyzer {
 
         val totalSkin = skinInside + skinOutside
         val outsideRatio = if (totalSkin == 0) 1.0 else skinOutside.toDouble() / totalSkin.toDouble()
-        val cluttered = outsideRatio > 0.35
+        val cluttered = outsideRatio > 0.6 && skinInside < skinOutside
         return SceneResult(cluttered = cluttered, skinOutsideRatio = outsideRatio)
     }
 
