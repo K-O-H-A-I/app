@@ -41,7 +41,7 @@ class FingerDetector(private val context: Context) {
         }
 
         return runCatching {
-            val scaled = downscale(bitmap, 640)
+            val scaled = downscale(bitmap, 480)
             val mpImage = BitmapImageBuilder(scaled).build()
             val result = handLandmarker!!.detect(mpImage)
             parseHandLandmarkerResult(result, scaled.width, scaled.height)

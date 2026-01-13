@@ -8,8 +8,8 @@ object TrackACaptureConfig {
     const val centerExitScore = 12
     const val coverageEnter = 0.08
     const val coverageExit = 0.05
-    const val detectionStableMs = 140L
-    const val readyStableMs = 200L
-    const val autoCaptureHoldMs = 260L
+    const val detectionStableMs = 120L
+    const val readyStableMs = 140L
+    const val autoCaptureHoldMs = 180L
     const val autoCaptureCooldownMs = 1200L
 }

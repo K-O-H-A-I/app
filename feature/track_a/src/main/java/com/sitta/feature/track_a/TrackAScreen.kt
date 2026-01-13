@@ -9,7 +9,6 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,15 +51,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -205,27 +200,9 @@ fun TrackAScreen(
     }
 
     val quality = uiState.qualityResult
-    val blurTarget = DefaultConfig.value.blurThreshold
-    val focusScore = quality?.metrics?.blurScore?.let {
-        ((it / blurTarget) * 100).toInt().coerceIn(0, 100)
-    } ?: 0
-    val lightScore = quality?.metrics?.illuminationMean?.let {
-        val min = DefaultConfig.value.illuminationMin
-        val max = DefaultConfig.value.illuminationMax
-        when {
-            it < min -> ((it / min) * 100).toInt()
-            it > max -> ((max / it) * 100).toInt()
-            else -> 100
-        }.coerceIn(0, 100)
-    } ?: 0
-    val steadyScore = quality?.metrics?.stabilityVariance?.let {
-        val max = DefaultConfig.value.stabilityMax
-        if (it <= 0.0) {
-            100
-        } else {
-            ((max / it).coerceIn(0.0, 1.0) * 100).toInt()
-        }
-    } ?: 0
+    val focusScore = uiState.focusScore
+    val lightScore = uiState.lightScore
+    val steadyScore = uiState.steadyScore
     val centerScore = uiState.centerScore
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
@@ -351,11 +328,11 @@ private fun RoundIconButton(
 @Composable
 private fun CameraOverlay(isReady: Boolean) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val guideWidth = (size.width * 0.62f).coerceIn(size.width * 0.55f, size.width * 0.75f)
-        val guideHeight = (size.height * 0.68f).coerceIn(size.height * 0.58f, size.height * 0.78f)
-        val left = 0f
-        val top = ((size.height - guideHeight) / 2f) + size.height * 0.08f
-        val safeTop = top.coerceAtLeast(0f)
+        val guideWidth = (size.width * 0.68f).coerceIn(size.width * 0.6f, size.width * 0.78f)
+        val guideHeight = (size.height * 0.52f).coerceIn(size.height * 0.45f, size.height * 0.62f)
+        val left = ((size.width - guideWidth) / 2f).coerceAtLeast(0f)
+        val top = ((size.height - guideHeight) / 2f).coerceAtLeast(0f)
+        val safeTop = top
         val rect = androidx.compose.ui.geometry.Rect(left, safeTop, left + guideWidth, safeTop + guideHeight)
         val radius = (minOf(guideWidth, guideHeight) * 0.28f).coerceAtLeast(18.dp.toPx())
 
@@ -406,22 +383,31 @@ private fun FingerprintGuideOverlay(visible: Boolean) {
     if (!visible) return
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val roi = buildGuideRoi(constraints.maxWidth, constraints.maxHeight)
-        val density = LocalDensity.current
-        val widthDp = with(density) { roi.width().toDp() }
-        val heightDp = with(density) { roi.height().toDp() }
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(roi.left, roi.top) }
-                .size(widthDp, heightDp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.fingerprint_guide),
-                contentDescription = null,
-                modifier = Modifier.fillMaxWidth(0.55f),
-                contentScale = ContentScale.Fit,
-                alpha = 0.45f,
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val rect = androidx.compose.ui.geometry.Rect(
+                roi.left.toFloat(),
+                roi.top.toFloat(),
+                roi.right.toFloat(),
+                roi.bottom.toFloat(),
             )
+            val radius = (minOf(rect.width, rect.height) * 0.065f).coerceAtLeast(7.dp.toPx())
+            val baseY = rect.top + rect.height * 0.22f
+            val xSteps = listOf(0.26f, 0.42f, 0.58f, 0.74f)
+            val yOffsets = listOf(0.02f, 0.0f, -0.01f, 0.01f)
+            xSteps.forEachIndexed { index, fx ->
+                val cx = rect.left + rect.width * fx
+                val cy = baseY + rect.height * yOffsets[index]
+                drawCircle(
+                    color = Color(0xFF14B8A6).copy(alpha = 0.45f),
+                    radius = radius,
+                    center = Offset(cx, cy),
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.25f),
+                    radius = radius * 0.6f,
+                    center = Offset(cx, cy),
+                )
+            }
         }
     }
 }

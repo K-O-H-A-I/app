@@ -5,6 +5,7 @@ import android.graphics.Rect
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sitta.core.common.AppResult
+import com.sitta.core.common.DefaultConfig
 import com.sitta.core.common.ArtifactFilenames
 import com.sitta.core.common.LivenessReport
 import com.sitta.core.common.QualityReport
@@ -98,17 +99,20 @@ class TrackAViewModel(
             val scene = fingerSceneAnalyzer.analyze(bitmap, effectiveRoi)
             val clutterPass = !scene.cluttered
 
-            val detectionStable = detectionGate.update(detectionPass && clutterPass, timestampMillis)
+            val detectionStable = detectionGate.update(detectionPass, timestampMillis)
             val centerScore = computeCenterScore(detection, effectiveRoi, bitmap.width, bitmap.height)
             val centerValid = centerScore > 0
+            val focusScore = scoreFocus(result.metrics.blurScore)
+            val lightScore = scoreLight(result.metrics.illuminationMean)
+            val steadyScore = scoreSteady(result.metrics.stabilityVariance)
             val qualityScore = result.score0To100
-            val coverage = result.metrics.coverageRatio
 
             val readyRaw = evaluateReadyRaw(
                 detectionStable = detectionStable,
                 centerScore = centerScore,
-                qualityScore = qualityScore,
-                coverage = coverage,
+                focusScore = focusScore,
+                lightScore = lightScore,
+                steadyScore = steadyScore,
             )
             val readyStable = readyGate.update(readyRaw, timestampMillis)
             lastReady = readyRaw
@@ -131,6 +135,9 @@ class TrackAViewModel(
                 centerScore = centerScore,
                 overlayLandmarks = overlayLandmarks,
                 debugOverlayEnabled = debugOverlayEnabled,
+                focusScore = focusScore,
+                lightScore = lightScore,
+                steadyScore = steadyScore,
                 message = when {
                     livenessEnabled && !livenessPass -> "Liveness failed"
                     !detectionPass -> "No finger detected"
@@ -220,7 +227,7 @@ class TrackAViewModel(
     }
 
     private fun runDetection(bitmap: Bitmap, timestampMillis: Long): FingerDetectionResult {
-        val minIntervalMs = 120L
+        val minIntervalMs = 90L
         val last = latestDetection
         return if (timestampMillis - lastDetectionMillis < minIntervalMs && last != null) {
             last
@@ -318,8 +325,9 @@ class TrackAViewModel(
     private fun evaluateReadyRaw(
         detectionStable: Boolean,
         centerScore: Int,
-        qualityScore: Int,
-        coverage: Double,
+        focusScore: Int,
+        lightScore: Int,
+        steadyScore: Int,
     ): Boolean {
         if (!detectionStable) {
             logBlocker("READY", "Detection unstable or missing")
@@ -330,17 +338,46 @@ class TrackAViewModel(
             logBlocker("READY", "Center score $centerScore below threshold")
             return false
         }
-        val qualityOk = if (lastReady) qualityScore >= TrackACaptureConfig.qualityExitScore else qualityScore >= TrackACaptureConfig.qualityEnterScore
-        if (!qualityOk) {
-            logBlocker("READY", "Quality score $qualityScore below threshold")
+        val focusOk = focusScore >= 80
+        if (!focusOk) {
+            logBlocker("READY", "Focus score $focusScore below threshold")
             return false
         }
-        val coverageOk = if (lastReady) coverage >= TrackACaptureConfig.coverageExit else coverage >= TrackACaptureConfig.coverageEnter
-        if (!coverageOk) {
-            logBlocker("READY", "Coverage $coverage below threshold")
+        val lightOk = lightScore >= 80
+        if (!lightOk) {
+            logBlocker("READY", "Light score $lightScore below threshold")
+            return false
+        }
+        val steadyOk = steadyScore >= 80
+        if (!steadyOk) {
+            logBlocker("READY", "Steady score $steadyScore below threshold")
             return false
         }
         return true
+    }
+
+    private fun scoreFocus(blurScore: Double): Int {
+        val threshold = DefaultConfig.value.blurThreshold
+        return ((blurScore / threshold) * 100).toInt().coerceIn(0, 100)
+    }
+
+    private fun scoreLight(illumination: Double): Int {
+        val min = DefaultConfig.value.illuminationMin
+        val max = DefaultConfig.value.illuminationMax
+        return when {
+            illumination < min -> ((illumination / min) * 100).toInt()
+            illumination > max -> ((max / illumination) * 100).toInt()
+            else -> 100
+        }.coerceIn(0, 100)
+    }
+
+    private fun scoreSteady(variance: Double): Int {
+        val max = DefaultConfig.value.stabilityMax
+        return if (variance <= 0.0) {
+            100
+        } else {
+            ((max / variance).coerceIn(0.0, 1.0) * 100).toInt()
+        }
     }
 
     private fun logBlocker(tag: String, message: String) {
@@ -394,6 +431,9 @@ data class TrackAUiState(
     val centerScore: Int = 0,
     val overlayLandmarks: List<com.sitta.core.vision.FingerLandmark> = emptyList(),
     val debugOverlayEnabled: Boolean = false,
+    val focusScore: Int = 0,
+    val lightScore: Int = 0,
+    val steadyScore: Int = 0,
     val message: String? = null,
     val captureNotice: String? = null,
     val captureSource: CaptureSource? = null,
