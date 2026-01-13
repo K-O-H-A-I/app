@@ -9,16 +9,19 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,11 +52,15 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -211,6 +218,14 @@ fun TrackAScreen(
             else -> 100
         }.coerceIn(0, 100)
     } ?: 0
+    val steadyScore = quality?.metrics?.stabilityVariance?.let {
+        val max = DefaultConfig.value.stabilityMax
+        if (it <= 0.0) {
+            100
+        } else {
+            ((max / it).coerceIn(0.0, 1.0) * 100).toInt()
+        }
+    } ?: 0
     val centerScore = uiState.centerScore
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
@@ -231,6 +246,7 @@ fun TrackAScreen(
                     ),
             )
             CameraOverlay(isReady = uiState.captureEnabled)
+            FingerprintGuideOverlay(visible = !uiState.captureEnabled)
             if (BuildConfig.DEBUG && uiState.debugOverlayEnabled) {
                 LandmarkOverlay(landmarks = uiState.overlayLandmarks)
             }
@@ -243,6 +259,12 @@ fun TrackAScreen(
             ) {
                 Column {
                     TopBar(onBack = onBack)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    QualityStateRow(
+                        focusScore = focusScore,
+                        lightScore = lightScore,
+                        steadyScore = steadyScore,
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     Column(
                         modifier = Modifier
@@ -271,6 +293,8 @@ fun TrackAScreen(
                     isReady = uiState.captureEnabled,
                     message = uiState.captureNotice ?: uiState.message,
                 )
+
+                StabilityBar(score = steadyScore)
 
                 BottomCaptureBar(
                     captureEnabled = uiState.captureEnabled,
@@ -350,7 +374,111 @@ private fun CameraOverlay(isReady: Boolean) {
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
             style = Stroke(width = 3.dp.toPx()),
         )
+
+        val gridColor = Color.White.copy(alpha = 0.12f)
+        val thirdX = rect.width / 3f
+        val thirdY = rect.height / 3f
+        drawLine(gridColor, start = Offset(rect.left + thirdX, rect.top), end = Offset(rect.left + thirdX, rect.bottom), strokeWidth = 1.dp.toPx())
+        drawLine(gridColor, start = Offset(rect.left + thirdX * 2f, rect.top), end = Offset(rect.left + thirdX * 2f, rect.bottom), strokeWidth = 1.dp.toPx())
+        drawLine(gridColor, start = Offset(rect.left, rect.top + thirdY), end = Offset(rect.right, rect.top + thirdY), strokeWidth = 1.dp.toPx())
+        drawLine(gridColor, start = Offset(rect.left, rect.top + thirdY * 2f), end = Offset(rect.right, rect.top + thirdY * 2f), strokeWidth = 1.dp.toPx())
+
+        val bracketColor = Color.White.copy(alpha = 0.6f)
+        val bracket = 24.dp.toPx()
+        val bracketStroke = 3.dp.toPx()
+        val inset = 8.dp.toPx()
+        drawLine(bracketColor, Offset(rect.left + inset, rect.top + bracket), Offset(rect.left + inset, rect.top + inset), strokeWidth = bracketStroke)
+        drawLine(bracketColor, Offset(rect.left + inset, rect.top + inset), Offset(rect.left + bracket, rect.top + inset), strokeWidth = bracketStroke)
+
+        drawLine(bracketColor, Offset(rect.right - inset, rect.top + bracket), Offset(rect.right - inset, rect.top + inset), strokeWidth = bracketStroke)
+        drawLine(bracketColor, Offset(rect.right - inset, rect.top + inset), Offset(rect.right - bracket, rect.top + inset), strokeWidth = bracketStroke)
+
+        drawLine(bracketColor, Offset(rect.left + inset, rect.bottom - bracket), Offset(rect.left + inset, rect.bottom - inset), strokeWidth = bracketStroke)
+        drawLine(bracketColor, Offset(rect.left + inset, rect.bottom - inset), Offset(rect.left + bracket, rect.bottom - inset), strokeWidth = bracketStroke)
+
+        drawLine(bracketColor, Offset(rect.right - inset, rect.bottom - bracket), Offset(rect.right - inset, rect.bottom - inset), strokeWidth = bracketStroke)
+        drawLine(bracketColor, Offset(rect.right - inset, rect.bottom - inset), Offset(rect.right - bracket, rect.bottom - inset), strokeWidth = bracketStroke)
     }
+}
+
+@Composable
+private fun FingerprintGuideOverlay(visible: Boolean) {
+    if (!visible) return
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val roi = buildGuideRoi(constraints.maxWidth, constraints.maxHeight)
+        val density = LocalDensity.current
+        val widthDp = with(density) { roi.width().toDp() }
+        val heightDp = with(density) { roi.height().toDp() }
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(roi.left, roi.top) }
+                .size(widthDp, heightDp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.fingerprint_guide),
+                contentDescription = null,
+                modifier = Modifier.fillMaxWidth(0.55f),
+                contentScale = ContentScale.Fit,
+                alpha = 0.45f,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QualityStateRow(focusScore: Int, lightScore: Int, steadyScore: Int) {
+    val focusState = scoreToState(focusScore)
+    val lightState = scoreToState(lightScore)
+    val steadyState = scoreToState(steadyScore)
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.Center) {
+            StatePill(focusState)
+            Spacer(modifier = Modifier.width(8.dp))
+            StatePill(lightState)
+            Spacer(modifier = Modifier.width(8.dp))
+            StatePill(steadyState)
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.Center) {
+            StateLabel("FOCUS")
+            Spacer(modifier = Modifier.width(24.dp))
+            StateLabel("LIGHT")
+            Spacer(modifier = Modifier.width(24.dp))
+            StateLabel("STEADY")
+        }
+    }
+}
+
+private enum class QualityState { GOOD, ADJUST, CHECK }
+
+private fun scoreToState(score: Int): QualityState {
+    return when {
+        score >= 80 -> QualityState.GOOD
+        score >= 55 -> QualityState.ADJUST
+        else -> QualityState.CHECK
+    }
+}
+
+@Composable
+private fun StatePill(state: QualityState) {
+    val (bg, text, label) = when (state) {
+        QualityState.GOOD -> Triple(Color(0xFF10B981), Color.White, "Good")
+        QualityState.ADJUST -> Triple(Color(0xFFF59E0B), Color.White, "Adjust")
+        QualityState.CHECK -> Triple(Color(0xFF4B5563), Color(0xFFE5E7EB), "Checking")
+    }
+    Box(
+        modifier = Modifier
+            .background(bg.copy(alpha = 0.85f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(text = label, color = text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun StateLabel(text: String) {
+    Text(text = text, color = Color(0xFF94A3B8), fontSize = 10.sp, letterSpacing = 1.1.sp)
 }
 
 @Composable
@@ -373,6 +501,44 @@ private fun StatusBanner(isReady: Boolean, message: String?) {
     ) {
         Text(text = text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
+}
+
+@Composable
+private fun StabilityBar(score: Int) {
+    val clamped = score.coerceIn(0, 100)
+    val barColor = when {
+        clamped >= 80 -> Color(0xFF10B981)
+        clamped >= 55 -> Color(0xFFF59E0B)
+        else -> Color(0xFF6B7280)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = "Hold Still", color = Color(0xFFCBD5F5), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "${clamped}%", color = Color(0xFFCBD5F5), fontSize = 11.sp)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .background(Color(0xFF0F172A).copy(alpha = 0.6f), RoundedCornerShape(999.dp)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(clamped / 100f)
+                    .height(6.dp)
+                    .background(barColor, RoundedCornerShape(999.dp)),
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(10.dp))
 }
 
 @Composable
