@@ -49,6 +49,21 @@ data class QualityReport(
     val pass: Boolean,
     val metrics: QualityMetrics,
     @SerializedName("top_reason") val topReason: String,
+    @SerializedName("performance") val performance: CapturePerformance? = null,
+)
+
+data class CapturePerformance(
+    @SerializedName("capture_start_ms") val captureStartMs: Long,
+    @SerializedName("ready_ms") val readyMs: Long?,
+    @SerializedName("capture_complete_ms") val captureCompleteMs: Long,
+    @SerializedName("time_to_ready_ms") val timeToReadyMs: Long?,
+    @SerializedName("total_time_ms") val totalTimeMs: Long,
+    @SerializedName("frames_analyzed") val framesAnalyzed: Int,
+    @SerializedName("mediapipe_success") val mediapipeSuccess: Int,
+    @SerializedName("mediapipe_fail") val mediapipeFail: Int,
+    @SerializedName("avg_blur") val avgBlur: Double,
+    @SerializedName("avg_light") val avgLight: Double,
+    @SerializedName("avg_steady") val avgSteady: Double,
 )
 
 data class MatchCandidate(

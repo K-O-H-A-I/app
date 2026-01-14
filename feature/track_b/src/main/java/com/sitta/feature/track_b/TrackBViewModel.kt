@@ -1,7 +1,11 @@
 package com.sitta.feature.track_b
 
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sitta.core.common.AppResult
@@ -23,6 +27,7 @@ class TrackBViewModel(
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
     private val qualityAnalyzer: QualityAnalyzer,
+    private val appContext: android.content.Context,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TrackBUiState())
     val uiState: StateFlow<TrackBUiState> = _uiState.asStateFlow()
@@ -35,9 +40,10 @@ class TrackBViewModel(
                 _uiState.value = _uiState.value.copy(message = "No session found")
                 return@launch
             }
-            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
+            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
+                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
             if (rawFile == null) {
-                _uiState.value = _uiState.value.copy(message = "raw.png not found")
+                _uiState.value = _uiState.value.copy(message = "Capture not found")
                 return@launch
             }
             val rawBitmap = BitmapFactory.decodeFile(rawFile.absolutePath)
@@ -60,7 +66,13 @@ class TrackBViewModel(
         val session = _uiState.value.session ?: return
         viewModelScope.launch(Dispatchers.IO) {
             sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, enhanced)
-            _uiState.value = _uiState.value.copy(message = "Saved to session")
+            val saved = saveToGallery(enhanced)
+            val message = if (saved != null) {
+                "Saved to session and gallery"
+            } else {
+                "Saved to session (gallery save failed)"
+            }
+            _uiState.value = _uiState.value.copy(message = message)
         }
     }
 
@@ -81,7 +93,30 @@ class TrackBViewModel(
             )
             sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, result.bitmap)
         }.onFailure {
-            _uiState.value = _uiState.value.copy(message = "Enhancement failed: ${it.message}")
+            _uiState.value = _uiState.value.copy(message = "Enhancement failed. Please try again.")
+        }
+    }
+
+    private fun saveToGallery(bitmap: Bitmap): Uri? {
+        val resolver = appContext.contentResolver
+        val name = "sitta_enhanced_${System.currentTimeMillis()}.png"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/SITTA")
+            }
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        return try {
+            resolver.openOutputStream(uri)?.use { stream ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
+                    return null
+                }
+            } ?: return null
+            uri
+        } catch (_: Throwable) {
+            null
         }
     }
 }

@@ -3,8 +3,15 @@
 package com.sitta.feature.track_a
 
 import android.util.Log
+import android.graphics.Rect
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -20,7 +27,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,16 +71,24 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sitta.feature.track_a.BuildConfig
-import com.sitta.core.common.DefaultConfig
 import com.sitta.core.data.AuthManager
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.data.SettingsRepository
 import com.sitta.core.domain.LivenessDetector
 import com.sitta.core.domain.QualityAnalyzer
+import com.sitta.core.vision.FrameCrop
 import com.sitta.core.vision.FingerDetector
+import com.sitta.core.vision.FingerLandmark
 import com.sitta.core.vision.FingerMasker
 import com.sitta.core.vision.FingerSceneAnalyzer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class TrackAViewModelFactory(
     private val sessionRepository: SessionRepository,
@@ -144,10 +159,21 @@ fun TrackAScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val captureExecutor = remember { Executors.newSingleThreadExecutor() }
+    val yuvConverter = remember { YuvToRgbConverter() }
+    val lumaScratch = remember { RoiLumaScratch() }
+    var lastLandmarkAtMs by remember { mutableStateOf(0L) }
     var useFrontCamera by remember { mutableStateOf(false) }
+    val captureScope = rememberCoroutineScope()
+    var captureBurstInFlight by remember { mutableStateOf(false) }
 
     val cameraControlState = remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    val cameraCaptureState = remember { mutableStateOf<ImageCapture?>(null) }
     var torchEnabled by remember { mutableStateOf(false) }
+    var autoTorchEnabled by remember { mutableStateOf(true) }
+    var lowLightSince by remember { mutableStateOf(0L) }
+    var highLightSince by remember { mutableStateOf(0L) }
+    var lastTorchChangeMs by remember { mutableStateOf(0L) }
 
     DisposableEffect(lifecycleOwner, enableCamera, useFrontCamera) {
         if (!enableCamera) {
@@ -165,14 +191,48 @@ fun TrackAScreen(
             }
             val analysis = ImageAnalysis.Builder()
                 .setTargetRotation(previewView.display.rotation)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            val capture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setJpegQuality(95)
+                .setTargetRotation(previewView.display.rotation)
                 .build()
             analysis.setAnalyzer(analysisExecutor) { imageProxy ->
                 try {
-                    val bitmap = imageProxy.toBitmap()
-                    val roi = buildGuideRoi(bitmap.width, bitmap.height)
-                    viewModel.onFrame(bitmap, roi, System.currentTimeMillis())
+                    val now = System.currentTimeMillis()
+                    val roi = buildGuideRoi(imageProxy.width, imageProxy.height)
+                    val luma = extractRoiLumaInto(imageProxy, roi, lumaScratch)
+                    val blur = computeLaplacianVarianceFast(luma.luma, luma.width, luma.height)
+                    val illumination = luma.mean
+                    viewModel.onLumaMetrics(
+                        blurScore = blur,
+                        illuminationMean = illumination,
+                        roi = roi,
+                        frameWidth = imageProxy.width,
+                        frameHeight = imageProxy.height,
+                        timestampMillis = now,
+                    )
+
+                    val cadenceMs = viewModel.landmarkCadenceMs(blur, illumination, now)
+                    if (now - lastLandmarkAtMs >= cadenceMs) {
+                        val crop = viewModel.computeLandmarkCropRect(
+                            frameWidth = imageProxy.width,
+                            frameHeight = imageProxy.height,
+                            guideRoi = roi,
+                            timestampMillis = now,
+                        )
+                        val cropRect = crop ?: Rect(0, 0, imageProxy.width, imageProxy.height)
+                        val targetMax = if (crop != null) 360 else 480
+                        val bitmap = yuvConverter.toBitmap(imageProxy, cropRect, targetMax)
+                        viewModel.onLandmarksFrame(
+                            bitmap,
+                            now,
+                            FrameCrop(imageProxy.width, imageProxy.height, cropRect),
+                        )
+                        lastLandmarkAtMs = now
+                    }
                 } catch (t: Throwable) {
                     Log.w("TrackA", "Frame analysis failed", t)
                 } finally {
@@ -186,8 +246,10 @@ fun TrackAScreen(
                     if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
                     analysis,
+                    capture,
                 )
                 cameraControlState.value = camera.cameraControl
+                cameraCaptureState.value = capture
             } catch (t: Throwable) {
                 Log.e("TrackA", "Camera binding failed", t)
             }
@@ -196,6 +258,7 @@ fun TrackAScreen(
         onDispose {
             runCatching { cameraProviderFuture.get().unbindAll() }
             analysisExecutor.shutdown()
+            captureExecutor.shutdown()
         }
     }
 
@@ -204,6 +267,84 @@ fun TrackAScreen(
     val lightScore = uiState.lightScore
     val steadyScore = uiState.steadyScore
     val centerScore = uiState.centerScore
+
+    LaunchedEffect(lightScore, cameraControlState.value) {
+        val control = cameraControlState.value ?: return@LaunchedEffect
+        if (!autoTorchEnabled) return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        if (lightScore <= TrackACaptureConfig.torchAutoOnScore) {
+            if (lowLightSince == 0L) lowLightSince = now
+            highLightSince = 0L
+            if (!torchEnabled && now - lowLightSince >= TrackACaptureConfig.torchDebounceMs &&
+                now - lastTorchChangeMs >= 1200L
+            ) {
+                torchEnabled = true
+                lastTorchChangeMs = now
+                control.enableTorch(true)
+            }
+        } else if (lightScore >= TrackACaptureConfig.torchAutoOffScore) {
+            if (highLightSince == 0L) highLightSince = now
+            lowLightSince = 0L
+            if (torchEnabled && now - highLightSince >= TrackACaptureConfig.torchDebounceMs &&
+                now - lastTorchChangeMs >= 1200L
+            ) {
+                torchEnabled = false
+                lastTorchChangeMs = now
+                control.enableTorch(false)
+            }
+        } else {
+            lowLightSince = 0L
+            highLightSince = 0L
+        }
+    }
+
+    LaunchedEffect(uiState.focusRequested, uiState.overlayLandmarks, cameraControlState.value) {
+        if (!uiState.focusRequested) return@LaunchedEffect
+        val control = cameraControlState.value ?: return@LaunchedEffect
+        if (previewView.width == 0 || previewView.height == 0) return@LaunchedEffect
+        val normalized = computeFocusPoint(uiState.overlayLandmarks) ?: return@LaunchedEffect
+        val factory = previewView.meteringPointFactory
+        val point = factory.createPoint(
+            normalized.x * previewView.width,
+            normalized.y * previewView.height,
+        )
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+            .setAutoCancelDuration(800, TimeUnit.MILLISECONDS)
+            .build()
+        control.startFocusAndMetering(action).addListener(
+            { viewModel.onFocusMeteringSettled() },
+            ContextCompat.getMainExecutor(context),
+        )
+    }
+
+    LaunchedEffect(uiState.autoCaptureRequested, cameraCaptureState.value) {
+        if (!uiState.autoCaptureRequested) return@LaunchedEffect
+        val imageCapture = cameraCaptureState.value ?: return@LaunchedEffect
+        if (captureBurstInFlight) return@LaunchedEffect
+        captureBurstInFlight = true
+        try {
+            val best = captureBestOfN(
+                imageCapture = imageCapture,
+                captureExecutor = captureExecutor,
+                converter = yuvConverter,
+                n = 3,
+                scoreFn = { bitmap ->
+                    withContext(Dispatchers.Default) { viewModel.scoreCandidate(bitmap) }
+                },
+            )
+            if (best != null) {
+                viewModel.captureFromBitmap(best)
+                viewModel.onAutoCaptureCompleted(true)
+            } else {
+                viewModel.onAutoCaptureCompleted(false)
+            }
+        } catch (t: Throwable) {
+            Log.e("TrackA", "Auto capture failed", t)
+            viewModel.onAutoCaptureCompleted(false)
+        } finally {
+            captureBurstInFlight = false
+        }
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -251,11 +392,11 @@ fun TrackAScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Row(horizontalArrangement = Arrangement.Center) {
-                            StatusChip("Focus", focusScore, quality?.passes?.focus == true)
+                            StatusChip("Focus", focusScore, focusScore >= 80)
                             Spacer(modifier = Modifier.width(8.dp))
-                            StatusChip("Light", lightScore, quality?.passes?.light == true)
+                            StatusChip("Light", lightScore, lightScore >= 80)
                             Spacer(modifier = Modifier.width(8.dp))
-                            StatusChip("Center", centerScore, quality?.passes?.coverage == true)
+                            StatusChip("Center", centerScore, centerScore >= TrackACaptureConfig.centerEnterScore)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -275,9 +416,41 @@ fun TrackAScreen(
 
                 BottomCaptureBar(
                     captureEnabled = uiState.captureEnabled,
-                    onCapture = { viewModel.capture() },
+                    onCapture = {
+                        val imageCapture = cameraCaptureState.value
+                        if (imageCapture == null) {
+                            viewModel.capture()
+                            return@BottomCaptureBar
+                        }
+                        if (captureBurstInFlight) return@BottomCaptureBar
+                        captureBurstInFlight = true
+                        captureScope.launch {
+                            try {
+                                val best = captureBestOfN(
+                                    imageCapture = imageCapture,
+                                    captureExecutor = captureExecutor,
+                                    converter = yuvConverter,
+                                    n = 3,
+                                    scoreFn = { bitmap ->
+                                        withContext(Dispatchers.Default) { viewModel.scoreCandidate(bitmap) }
+                                    },
+                                )
+                                if (best != null) {
+                                    viewModel.captureFromBitmap(best)
+                                } else {
+                                    viewModel.capture()
+                                }
+                            } catch (t: Throwable) {
+                                Log.e("TrackA", "Best-of capture failed", t)
+                                viewModel.capture()
+                            } finally {
+                                captureBurstInFlight = false
+                            }
+                        }
+                    },
                     onFlashToggle = {
                         torchEnabled = !torchEnabled
+                        autoTorchEnabled = false
                         cameraControlState.value?.enableTorch(torchEnabled)
                     },
                     torchEnabled = torchEnabled,
@@ -391,8 +564,8 @@ private fun FingerprintGuideOverlay(visible: Boolean) {
                 roi.bottom.toFloat(),
             )
             val radius = (minOf(rect.width, rect.height) * 0.065f).coerceAtLeast(7.dp.toPx())
-            val baseY = rect.top + rect.height * 0.22f
-            val xSteps = listOf(0.26f, 0.42f, 0.58f, 0.74f)
+            val baseY = rect.top + rect.height * 0.3f
+            val xSteps = listOf(0.22f, 0.40f, 0.60f, 0.78f)
             val yOffsets = listOf(0.02f, 0.0f, -0.01f, 0.01f)
             xSteps.forEachIndexed { index, fx ->
                 val cx = rect.left + rect.width * fx
@@ -525,6 +698,204 @@ private fun StabilityBar(score: Int) {
         }
     }
     Spacer(modifier = Modifier.height(10.dp))
+}
+
+private fun computeFocusPoint(landmarks: List<FingerLandmark>): Offset? {
+    if (landmarks.isEmpty()) return null
+    val tips = landmarks.filter {
+        it.type == com.sitta.core.vision.LandmarkType.INDEX_TIP ||
+            it.type == com.sitta.core.vision.LandmarkType.MIDDLE_TIP ||
+            it.type == com.sitta.core.vision.LandmarkType.RING_TIP ||
+            it.type == com.sitta.core.vision.LandmarkType.PINKY_TIP
+    }
+    val points = if (tips.isNotEmpty()) tips else landmarks
+    val avgX = points.map { it.x }.average().toFloat()
+    val avgY = points.map { it.y }.average().toFloat()
+    return Offset(avgX.coerceIn(0f, 1f), avgY.coerceIn(0f, 1f))
+}
+
+private data class LumaRoi(
+    val luma: ByteArray,
+    val width: Int,
+    val height: Int,
+    val mean: Double,
+    val glarePct: Double,
+)
+
+private class RoiLumaScratch {
+    var buf: ByteArray = ByteArray(0)
+    var capacity: Int = 0
+}
+
+private fun extractRoiLumaInto(image: ImageProxy, roi: Rect, scratch: RoiLumaScratch): LumaRoi {
+    val plane = image.planes[0]
+    val buffer = plane.buffer.duplicate()
+    val rowStride = plane.rowStride
+    val pixelStride = plane.pixelStride
+    val width = roi.width().coerceAtLeast(0)
+    val height = roi.height().coerceAtLeast(0)
+    if (width == 0 || height == 0) return LumaRoi(ByteArray(0), 0, 0, 0.0, 0.0)
+
+    val needed = width * height
+    if (scratch.capacity < needed) {
+        scratch.buf = ByteArray(needed)
+        scratch.capacity = needed
+    }
+    val out = scratch.buf
+
+    var sum = 0L
+    var bright = 0L
+    var outIndex = 0
+    val start = roi.top * rowStride + roi.left * pixelStride
+
+    for (row in 0 until height) {
+        val rowStart = start + row * rowStride
+        buffer.position(rowStart)
+        if (pixelStride == 1) {
+            buffer.get(out, outIndex, width)
+            for (i in 0 until width) {
+                val v = out[outIndex + i].toInt() and 0xFF
+                sum += v
+                if (v > 245) bright++
+            }
+            outIndex += width
+        } else {
+            for (x in 0 until width) {
+                val v = buffer.get().toInt() and 0xFF
+                out[outIndex++] = v.toByte()
+                sum += v
+                if (v > 245) bright++
+                for (skip in 1 until pixelStride) buffer.get()
+            }
+        }
+    }
+
+    val total = (width * height).toDouble()
+    return LumaRoi(
+        luma = out,
+        width = width,
+        height = height,
+        mean = if (total > 0) sum / total else 0.0,
+        glarePct = if (total > 0) bright / total else 0.0,
+    )
+}
+
+private fun computeLaplacianVarianceFast(luma: ByteArray, width: Int, height: Int): Double {
+    if (width < 3 || height < 3) return 0.0
+    var mean = 0.0
+    var m2 = 0.0
+    var count = 0L
+    for (y in 1 until height - 1) {
+        val row = y * width
+        for (x in 1 until width - 1) {
+            val idx = row + x
+            val c = luma[idx].toInt() and 0xFF
+            val u = luma[idx - width].toInt() and 0xFF
+            val d = luma[idx + width].toInt() and 0xFF
+            val l = luma[idx - 1].toInt() and 0xFF
+            val r = luma[idx + 1].toInt() and 0xFF
+            val lap = (u + d + l + r - (c shl 2)).toDouble()
+            count++
+            val delta = lap - mean
+            mean += delta / count.toDouble()
+            m2 += delta * (lap - mean)
+        }
+    }
+    return if (count > 1) m2 / count.toDouble() else 0.0
+}
+
+private suspend fun ImageCapture.takePictureSuspend(executor: java.util.concurrent.Executor): androidx.camera.core.ImageProxy =
+    suspendCancellableCoroutine { cont ->
+        takePicture(
+            executor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+                    if (cont.isCancelled) {
+                        image.close()
+                        return
+                    }
+                    cont.resume(image, null)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    if (cont.isCancelled) return
+                    cont.resumeWithException(exception)
+                }
+            },
+        )
+    }
+
+private suspend fun captureBestOfN(
+    imageCapture: ImageCapture,
+    captureExecutor: java.util.concurrent.Executor,
+    converter: YuvToRgbConverter,
+    n: Int,
+    scoreFn: suspend (android.graphics.Bitmap) -> Double,
+): android.graphics.Bitmap? {
+    var bestScore = Double.NEGATIVE_INFINITY
+    var bestJpeg: ByteArray? = null
+    var bestBitmap: android.graphics.Bitmap? = null
+    repeat(n) {
+        val image = imageCapture.takePictureSuspend(captureExecutor)
+        try {
+            if (image.format == ImageFormat.JPEG) {
+                val bytes = image.jpegBytes()
+                val sample = decodeSampledBitmap(bytes, 320)
+                val score = scoreFn(sample)
+                if (score > bestScore) {
+                    bestScore = score
+                    bestJpeg = bytes
+                    bestBitmap = null
+                }
+            } else {
+                val bmp = converter.toBitmap(image, Rect(0, 0, image.width, image.height), 480)
+                val score = scoreFn(bmp)
+                if (score > bestScore) {
+                    bestScore = score
+                    bestBitmap = bmp
+                    bestJpeg = null
+                }
+            }
+        } finally {
+            image.close()
+        }
+    }
+    val jpeg = bestJpeg
+    return if (jpeg != null) {
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+    } else {
+        bestBitmap
+    }
+}
+
+private fun ImageProxy.jpegBytes(): ByteArray {
+    val buffer = planes[0].buffer
+    val bytes = ByteArray(buffer.remaining())
+    buffer.get(bytes)
+    return bytes
+}
+
+private fun decodeSampledBitmap(bytes: ByteArray, reqMax: Int): android.graphics.Bitmap {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+    options.inSampleSize = calculateInSampleSize(options, reqMax, reqMax)
+    options.inJustDecodeBounds = false
+    options.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+}
+
+private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+    val height = options.outHeight
+    val width = options.outWidth
+    var inSampleSize = 1
+    if (height > reqHeight || width > reqWidth) {
+        var halfHeight = height / 2
+        var halfWidth = width / 2
+        while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+            inSampleSize *= 2
+        }
+    }
+    return inSampleSize.coerceAtLeast(1)
 }
 
 @Composable

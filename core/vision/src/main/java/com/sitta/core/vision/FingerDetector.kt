@@ -8,11 +8,19 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import java.util.TreeMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.atan2
 
 class FingerDetector(private val context: Context) {
     private var handLandmarker: HandLandmarker? = null
     private var isInitialized = false
+    private val pendingFrames = TreeMap<Long, FrameCrop>()
+    private val pendingLock = Any()
+    private val inFlight = AtomicInteger(0)
+    private val maxInFlight = 2
+    private var onResult: ((FingerDetectionResult, Long, Int, Int) -> Unit)? = null
+    private var onError: ((Throwable) -> Unit)? = null
 
     fun initialize() {
         if (isInitialized) return
@@ -22,11 +30,24 @@ class FingerDetector(private val context: Context) {
                 .build()
             val options = HandLandmarker.HandLandmarkerOptions.builder()
                 .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.IMAGE)
+                .setRunningMode(RunningMode.LIVE_STREAM)
                 .setNumHands(1)
-                .setMinHandDetectionConfidence(0.45f)
-                .setMinHandPresenceConfidence(0.45f)
-                .setMinTrackingConfidence(0.45f)
+                .setMinHandDetectionConfidence(0.6f)
+                .setMinHandPresenceConfidence(0.65f)
+                .setMinTrackingConfidence(0.6f)
+                .setResultListener { result, _ ->
+                    inFlight.updateAndGet { if (it > 0) it - 1 else 0 }
+                    val timestamp = result.timestampMs()
+                    val crop = popPending(timestamp)
+                    val detection = parseHandLandmarkerResult(result, crop)
+                    val frameWidth = crop?.frameWidth ?: 1
+                    val frameHeight = crop?.frameHeight ?: 1
+                    onResult?.invoke(detection, timestamp, frameWidth, frameHeight)
+                }
+                .setErrorListener { error ->
+                    inFlight.updateAndGet { if (it > 0) it - 1 else 0 }
+                    onError?.invoke(error)
+                }
                 .build()
             handLandmarker = HandLandmarker.createFromOptions(context, options)
             isInitialized = true
@@ -35,35 +56,66 @@ class FingerDetector(private val context: Context) {
         }
     }
 
-    fun detectFinger(bitmap: Bitmap): FingerDetectionResult {
-        if (!isInitialized || handLandmarker == null) {
-            return detectFingerFallback(bitmap)
-        }
+    fun setResultListener(listener: (FingerDetectionResult, Long, Int, Int) -> Unit) {
+        onResult = listener
+    }
 
-        return runCatching {
-            val scaled = downscale(bitmap, 480)
-            val mpImage = BitmapImageBuilder(scaled).build()
-            val result = handLandmarker!!.detect(mpImage)
-            parseHandLandmarkerResult(result, scaled.width, scaled.height)
-        }.getOrElse {
-            detectFingerFallback(bitmap)
+    fun setErrorListener(listener: (Throwable) -> Unit) {
+        onError = listener
+    }
+
+    fun detectFinger(bitmap: Bitmap): FingerDetectionResult {
+        return detectFingerFallback(bitmap)
+    }
+
+    fun detectAsync(bitmap: Bitmap, timestampMillis: Long, crop: FrameCrop) {
+        if (!isInitialized || handLandmarker == null) {
+            onResult?.invoke(detectFingerFallback(bitmap), timestampMillis, crop.frameWidth, crop.frameHeight)
+            return
+        }
+        if (inFlight.get() >= maxInFlight) {
+            return
+        }
+        val mpImage = BitmapImageBuilder(bitmap).build()
+        synchronized(pendingLock) {
+            if (pendingFrames.size >= 6) {
+                pendingFrames.pollFirstEntry()
+            }
+            pendingFrames[timestampMillis] = crop
+        }
+        inFlight.incrementAndGet()
+        handLandmarker?.detectAsync(mpImage, timestampMillis)
+    }
+
+    private fun popPending(timestampMillis: Long): FrameCrop? {
+        synchronized(pendingLock) {
+            return pendingFrames.remove(timestampMillis)
         }
     }
 
     private fun parseHandLandmarkerResult(
         result: HandLandmarkerResult,
-        imageWidth: Int,
-        imageHeight: Int,
+        cropInfo: FrameCrop?,
     ): FingerDetectionResult {
         if (result.landmarks().isEmpty()) {
             return FingerDetectionResult.notDetected()
         }
 
+        val cropRect = cropInfo?.cropRect
+        val frameWidth = cropInfo?.frameWidth ?: 1
+        val frameHeight = cropInfo?.frameHeight ?: 1
+        val cropWidth = cropRect?.width() ?: frameWidth
+        val cropHeight = cropRect?.height() ?: frameHeight
+        val cropLeft = cropRect?.left ?: 0
+        val cropTop = cropRect?.top ?: 0
+
         val handLandmarks = result.landmarks()[0]
         val landmarks = handLandmarks.mapIndexed { index, landmark ->
+            val fullX = (cropLeft + (landmark.x() * cropWidth)) / frameWidth.toFloat()
+            val fullY = (cropTop + (landmark.y() * cropHeight)) / frameHeight.toFloat()
             FingerLandmark(
-                x = landmark.x(),
-                y = landmark.y(),
+                x = fullX.coerceIn(0f, 1f),
+                y = fullY.coerceIn(0f, 1f),
                 z = landmark.z(),
                 type = indexToLandmarkType(index),
             )
@@ -129,8 +181,6 @@ class FingerDetector(private val context: Context) {
         val v2y = pinkyMcp.y - wrist.y
         val v2z = pinkyMcp.z - wrist.z
 
-        val nx = v1y * v2z - v1z * v2y
-        val ny = v1z * v2x - v1x * v2z
         val nz = v1x * v2y - v1y * v2x
 
         return nz < 0f

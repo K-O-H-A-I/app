@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,11 +56,12 @@ class TrackBViewModelFactory(
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
     private val qualityAnalyzer: QualityAnalyzer,
+    private val appContext: android.content.Context,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TrackBViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TrackBViewModel(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer) as T
+            return TrackBViewModel(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer, appContext) as T
         }
         error("Unknown ViewModel class")
     }
@@ -74,7 +76,13 @@ fun TrackBScreen(
     onBack: () -> Unit,
 ) {
     val viewModel: TrackBViewModel = viewModel(
-        factory = TrackBViewModelFactory(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer),
+        factory = TrackBViewModelFactory(
+            sessionRepository,
+            authManager,
+            enhancementPipeline,
+            qualityAnalyzer,
+            LocalContext.current.applicationContext,
+        ),
     )
     val uiState by viewModel.uiState.collectAsState()
 
@@ -183,7 +191,7 @@ fun TrackBScreen(
 
         uiState.message?.let {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(text = it, color = Color(0xFF38D39F), fontSize = 12.sp)
+            ErrorBanner(message = it)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -339,5 +347,17 @@ private fun RoundIconButton(
         contentAlignment = Alignment.Center,
     ) {
         Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White)
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF3B1E27), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(text = message, color = Color(0xFFFCA5A5), fontSize = 12.sp)
     }
 }

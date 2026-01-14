@@ -7,6 +7,7 @@ import com.sitta.core.domain.EnhancementStep
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.opencv.android.Utils
+import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.Size
@@ -16,8 +17,9 @@ class OpenCvEnhancementPipeline : EnhancementPipeline {
     override suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): EnhancementResult {
         return withContext(Dispatchers.Default) {
             val steps = mutableListOf<EnhancementStep>()
+            val input = downscale(bitmap, 420)
             val srcMat = Mat()
-            Utils.bitmapToMat(bitmap, srcMat)
+            Utils.bitmapToMat(input, srcMat)
 
             val t0 = System.nanoTime()
             val gray = Mat()
@@ -25,14 +27,15 @@ class OpenCvEnhancementPipeline : EnhancementPipeline {
             steps.add(EnhancementStep("Grayscale", elapsedMs(t0)))
 
             val t1 = System.nanoTime()
-            val clahe = Imgproc.createCLAHE(2.0, Size(8.0, 8.0))
+            Core.normalize(gray, gray, 0.0, 255.0, Core.NORM_MINMAX)
+            val clahe = Imgproc.createCLAHE(2.2, Size(8.0, 8.0))
             val claheMat = Mat()
             clahe.apply(gray, claheMat)
             steps.add(EnhancementStep("Contrast Boost", elapsedMs(t1)))
 
             val t2 = System.nanoTime()
             val denoised = Mat()
-            Imgproc.bilateralFilter(claheMat, denoised, 9, 75.0, 75.0)
+            Imgproc.bilateralFilter(claheMat, denoised, 7, 60.0, 60.0)
             steps.add(EnhancementStep("Noise Reduction", elapsedMs(t2)))
 
             val t3 = System.nanoTime()
@@ -57,5 +60,16 @@ class OpenCvEnhancementPipeline : EnhancementPipeline {
 
     private fun elapsedMs(startNs: Long): Long {
         return ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1)
+    }
+
+    private fun downscale(bitmap: Bitmap, maxSide: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val maxDim = maxOf(width, height)
+        if (maxDim <= maxSide) return bitmap
+        val scale = maxSide.toFloat() / maxDim.toFloat()
+        val newWidth = (width * scale).toInt().coerceAtLeast(1)
+        val newHeight = (height * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
     }
 }
