@@ -228,8 +228,8 @@ fun TrackAScreen(
                                 imageToPreviewTransform = CoordinateTransform(imageTransform, previewTransform)
                                 previewToImageTransform = CoordinateTransform(previewTransform, imageTransform)
                                 analysisSize = imageProxy.width to imageProxy.height
-                                analysisCropRect = imageProxy.cropRect
                             }
+                            analysisCropRect = imageProxy.cropRect
                         }
                         val previewRoi = buildGuideRoi(previewView.width, previewView.height)
                         val transform = previewToImageTransform
@@ -239,12 +239,26 @@ fun TrackAScreen(
                             buildGuideRoi(imageProxy.width, imageProxy.height)
                         }
                     }
-                    val roi = mappedRoi.takeIf { it.width() > 8 && it.height() > 8 }
-                        ?: Rect(0, 0, imageProxy.width, imageProxy.height)
-                    val luma = extractRoiLumaInto(imageProxy, roi, lumaScratch)
-                    val blur = computeLaplacianVarianceFast(luma.luma, luma.width, luma.height)
+                    val cropRect = imageProxy.cropRect
+                    val roi = centerCropRect(cropRect, 0.6f)
+                    val lumaPrimary = extractRoiLumaInto(imageProxy, roi, lumaScratch)
+                    val blurPrimary = computeLaplacianVarianceFast(lumaPrimary.luma, lumaPrimary.width, lumaPrimary.height)
+                    val illuminationPrimary = lumaPrimary.mean
+                    val useFallback = (lumaPrimary.width == 0 || lumaPrimary.height == 0) ||
+                        (illuminationPrimary == 0.0 && blurPrimary == 0.0)
+                    val metricsRoi = if (useFallback) cropRect else roi
+                    val luma = if (useFallback) {
+                        extractRoiLumaInto(imageProxy, metricsRoi, lumaScratch)
+                    } else {
+                        lumaPrimary
+                    }
+                    val blur = if (useFallback) {
+                        computeLaplacianVarianceFast(luma.luma, luma.width, luma.height)
+                    } else {
+                        blurPrimary
+                    }
                     val illumination = luma.mean
-                    val innerRoi = insetRect(roi, 0.15f)
+                    val innerRoi = insetRect(metricsRoi, 0.15f)
                     val textureLuma = if (innerRoi.width() > 0 && innerRoi.height() > 0) {
                         extractRoiLumaInto(imageProxy, innerRoi, lumaScratch)
                     } else {
@@ -257,7 +271,7 @@ fun TrackAScreen(
                         illuminationMean = illumination,
                         edgeDensity = edgeDensity,
                         textureVariance = textureVariance,
-                        roi = roi,
+                        roi = metricsRoi,
                         frameWidth = imageProxy.width,
                         frameHeight = imageProxy.height,
                         timestampMillis = now,
@@ -299,8 +313,6 @@ fun TrackAScreen(
 
         onDispose {
             runCatching { cameraProviderFuture.get().unbindAll() }
-            analysisExecutor.shutdown()
-            captureExecutor.shutdown()
         }
     }
 
@@ -853,6 +865,18 @@ private fun mapRectToImage(
         maxX.toInt().coerceAtMost(imageWidth),
         maxY.toInt().coerceAtMost(imageHeight),
     )
+}
+
+private fun centerCropRect(rect: Rect, fraction: Float): Rect {
+    val safeFraction = fraction.coerceIn(0.2f, 1f)
+    val width = rect.width()
+    val height = rect.height()
+    if (width <= 0 || height <= 0) return rect
+    val cropW = (width * safeFraction).toInt().coerceAtLeast(1)
+    val cropH = (height * safeFraction).toInt().coerceAtLeast(1)
+    val left = rect.left + (width - cropW) / 2
+    val top = rect.top + (height - cropH) / 2
+    return Rect(left, top, left + cropW, top + cropH)
 }
 
 private data class LumaRoi(
