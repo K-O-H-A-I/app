@@ -6,38 +6,60 @@ import com.sitta.core.common.AppResult
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 class SessionExporter(private val context: Context) {
     fun exportAllSessions(sessionsRoot: File): AppResult<File> {
         return runCatching {
-            val exportDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: context.getExternalFilesDir(null)
-                ?: throw IllegalStateException("External storage not available")
-            if (!exportDir.exists()) exportDir.mkdirs()
-            val output = File(exportDir, "sitta_sessions_${System.currentTimeMillis()}.zip")
-            ZipOutputStream(FileOutputStream(output)).use { zip ->
-                addDir(zip, sessionsRoot, "sessions")
+            val downloadsRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val baseDir = File(downloadsRoot, "SITTA")
+            val timestamp = System.currentTimeMillis()
+            val output = File(baseDir, "sessions_$timestamp")
+            val sessionsOut = File(output, "sessions")
+            val targetDir = when {
+                ensureDirWritable(sessionsOut) -> sessionsOut
+                else -> {
+                    val fallbackRoot = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                        ?: context.getExternalFilesDir(null)
+                        ?: throw IllegalStateException("External storage not available")
+                    val fallbackOutput = File(fallbackRoot, "sitta_sessions_$timestamp/sessions")
+                    if (!ensureDirWritable(fallbackOutput)) {
+                        throw IllegalStateException("Cannot write to external storage")
+                    }
+                    fallbackOutput
+                }
             }
-            output
+            copyDir(sessionsRoot, targetDir)
+            targetDir.parentFile ?: targetDir
         }.fold(
             onSuccess = { AppResult.Success(it) },
             onFailure = { AppResult.Error("Export failed", it) },
         )
     }
 
-    private fun addDir(zip: ZipOutputStream, dir: File, baseName: String) {
-        val files = dir.listFiles() ?: return
+    private fun ensureDirWritable(dir: File): Boolean {
+        return try {
+            if (!dir.exists() && !dir.mkdirs()) return false
+            val probe = File(dir, ".probe")
+            FileOutputStream(probe).use { it.write(1) }
+            probe.delete()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun copyDir(source: File, dest: File) {
+        val files = source.listFiles() ?: return
         files.forEach { file ->
-            val entryName = "$baseName/${file.name}"
+            val target = File(dest, file.name)
             if (file.isDirectory) {
-                addDir(zip, file, entryName)
+                if (!target.exists()) target.mkdirs()
+                copyDir(file, target)
             } else {
                 FileInputStream(file).use { input ->
-                    zip.putNextEntry(ZipEntry(entryName))
-                    input.copyTo(zip)
-                    zip.closeEntry()
+                    FileOutputStream(target).use { output ->
+                        input.copyTo(output)
+                    }
                 }
             }
         }

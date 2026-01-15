@@ -14,11 +14,12 @@ import kotlin.math.atan2
 
 class FingerDetector(private val context: Context) {
     private var handLandmarker: HandLandmarker? = null
+    private var stillLandmarker: HandLandmarker? = null
     private var isInitialized = false
     private val pendingFrames = TreeMap<Long, FrameCrop>()
     private val pendingLock = Any()
     private val inFlight = AtomicInteger(0)
-    private val maxInFlight = 2
+    private val maxInFlight = 1
     private var onResult: ((FingerDetectionResult, Long, Int, Int) -> Unit)? = null
     private var onError: ((Throwable) -> Unit)? = null
 
@@ -32,14 +33,19 @@ class FingerDetector(private val context: Context) {
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setNumHands(1)
-                .setMinHandDetectionConfidence(0.6f)
-                .setMinHandPresenceConfidence(0.65f)
-                .setMinTrackingConfidence(0.6f)
+                .setMinHandDetectionConfidence(0.4f)
+                .setMinHandPresenceConfidence(0.35f)
+                .setMinTrackingConfidence(0.4f)
                 .setResultListener { result, _ ->
                     inFlight.updateAndGet { if (it > 0) it - 1 else 0 }
                     val timestamp = result.timestampMs()
                     val crop = popPending(timestamp)
-                    val detection = parseHandLandmarkerResult(result, crop)
+                    val detection = parseHandLandmarkerResult(
+                        result = result,
+                        frameWidth = crop?.frameWidth ?: 1,
+                        frameHeight = crop?.frameHeight ?: 1,
+                        cropRect = crop?.cropRect,
+                    )
                     val frameWidth = crop?.frameWidth ?: 1
                     val frameHeight = crop?.frameHeight ?: 1
                     onResult?.invoke(detection, timestamp, frameWidth, frameHeight)
@@ -66,6 +72,17 @@ class FingerDetector(private val context: Context) {
 
     fun detectFinger(bitmap: Bitmap): FingerDetectionResult {
         return detectFingerFallback(bitmap)
+    }
+
+    fun detectFingerStill(bitmap: Bitmap): FingerDetectionResult {
+        val landmarker = ensureStillLandmarker() ?: return detectFingerFallback(bitmap)
+        return runCatching {
+            val mpImage = BitmapImageBuilder(bitmap).build()
+            val result = landmarker.detect(mpImage)
+            parseHandLandmarkerResult(result, bitmap.width, bitmap.height, null)
+        }.getOrElse {
+            detectFingerFallback(bitmap)
+        }
     }
 
     fun detectAsync(bitmap: Bitmap, timestampMillis: Long, crop: FrameCrop) {
@@ -95,15 +112,14 @@ class FingerDetector(private val context: Context) {
 
     private fun parseHandLandmarkerResult(
         result: HandLandmarkerResult,
-        cropInfo: FrameCrop?,
+        frameWidth: Int,
+        frameHeight: Int,
+        cropRect: android.graphics.Rect?,
     ): FingerDetectionResult {
         if (result.landmarks().isEmpty()) {
             return FingerDetectionResult.notDetected()
         }
 
-        val cropRect = cropInfo?.cropRect
-        val frameWidth = cropInfo?.frameWidth ?: 1
-        val frameHeight = cropInfo?.frameHeight ?: 1
         val cropWidth = cropRect?.width() ?: frameWidth
         val cropHeight = cropRect?.height() ?: frameHeight
         val cropLeft = cropRect?.left ?: 0
@@ -262,6 +278,24 @@ class FingerDetector(private val context: Context) {
         )
     }
 
+    private fun ensureStillLandmarker(): HandLandmarker? {
+        if (stillLandmarker != null) return stillLandmarker
+        return runCatching {
+            val baseOptions = BaseOptions.builder()
+                .setModelAssetPath("hand_landmarker.task")
+                .build()
+            val options = HandLandmarker.HandLandmarkerOptions.builder()
+                .setBaseOptions(baseOptions)
+                .setRunningMode(RunningMode.IMAGE)
+                .setNumHands(1)
+                .setMinHandDetectionConfidence(0.4f)
+                .setMinHandPresenceConfidence(0.35f)
+                .setMinTrackingConfidence(0.4f)
+                .build()
+            HandLandmarker.createFromOptions(context, options)
+        }.getOrNull().also { stillLandmarker = it }
+    }
+
     private fun isSkinColor(pixel: Int): Boolean {
         val r = (pixel shr 16) and 0xff
         val g = (pixel shr 8) and 0xff
@@ -296,7 +330,9 @@ class FingerDetector(private val context: Context) {
 
     fun close() {
         handLandmarker?.close()
+        stillLandmarker?.close()
         handLandmarker = null
+        stillLandmarker = null
         isInitialized = false
     }
 }

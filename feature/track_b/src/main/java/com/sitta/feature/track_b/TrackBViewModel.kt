@@ -16,6 +16,8 @@ import com.sitta.core.data.SessionRepository
 import com.sitta.core.domain.EnhancementPipeline
 import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.domain.QualityResult
+import com.sitta.core.vision.FingerRidgeExtractor
+import com.sitta.core.vision.FingerSkeletonizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +29,8 @@ class TrackBViewModel(
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
     private val qualityAnalyzer: QualityAnalyzer,
+    private val ridgeExtractor: FingerRidgeExtractor,
+    private val skeletonizer: FingerSkeletonizer,
     private val appContext: android.content.Context,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TrackBUiState())
@@ -40,7 +44,8 @@ class TrackBViewModel(
                 _uiState.value = _uiState.value.copy(message = "No session found")
                 return@launch
             }
-            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
+            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
+                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
                 ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
             if (rawFile == null) {
                 _uiState.value = _uiState.value.copy(message = "Capture not found")
@@ -79,6 +84,8 @@ class TrackBViewModel(
     private suspend fun processEnhancement(bitmap: Bitmap, session: SessionInfo, strength: Float) {
         runCatching {
             val result = enhancementPipeline.enhance(bitmap, strength)
+            val ridgeBitmap = ridgeExtractor.extractRidge(result.bitmap)
+            val skeletonBitmap = skeletonizer.skeletonize(ridgeBitmap)
             val t0 = System.nanoTime()
             val quality = qualityAnalyzer.analyze(
                 result.bitmap,
@@ -87,11 +94,14 @@ class TrackBViewModel(
             val qualityMs = ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1)
             _uiState.value = _uiState.value.copy(
                 enhancedBitmap = result.bitmap,
+                ridgeBitmap = ridgeBitmap,
+                skeletonBitmap = skeletonBitmap,
                 steps = result.steps + com.sitta.core.domain.EnhancementStep("Quality Check", qualityMs),
                 qualityResult = quality,
                 message = null,
             )
             sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, result.bitmap)
+            sessionRepository.saveBitmap(session, ArtifactFilenames.SKELETON, skeletonBitmap)
         }.onFailure {
             _uiState.value = _uiState.value.copy(message = "Enhancement failed. Please try again.")
         }
@@ -119,11 +129,17 @@ class TrackBViewModel(
             null
         }
     }
+
+    fun clearMessage() {
+        _uiState.value = _uiState.value.copy(message = null)
+    }
 }
 
 data class TrackBUiState(
     val rawBitmap: Bitmap? = null,
     val enhancedBitmap: Bitmap? = null,
+    val ridgeBitmap: Bitmap? = null,
+    val skeletonBitmap: Bitmap? = null,
     val steps: List<com.sitta.core.domain.EnhancementStep> = emptyList(),
     val qualityResult: QualityResult? = null,
     val sharpenStrength: Float = 1f,

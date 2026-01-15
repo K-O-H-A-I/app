@@ -5,7 +5,9 @@ import com.google.gson.annotations.SerializedName
 object ArtifactFilenames {
     const val RAW = "raw.png"
     const val ROI = "roi.png"
+    const val SEGMENTED = "segmented.png"
     const val ENHANCED = "enhanced.png"
+    const val SKELETON = "skeleton.png"
     const val QUALITY = "quality.json"
     const val MATCH = "match.json"
     const val LIVENESS = "liveness.json"
@@ -49,6 +51,7 @@ data class QualityReport(
     val pass: Boolean,
     val metrics: QualityMetrics,
     @SerializedName("top_reason") val topReason: String,
+    @SerializedName("capture_mode") val captureMode: String? = null,
     @SerializedName("performance") val performance: CapturePerformance? = null,
 )
 

@@ -46,7 +46,6 @@ class TrackAViewModel(
     private val fingerSceneAnalyzer: FingerSceneAnalyzer,
     private val fingerMasker: FingerMasker,
 ) : ViewModel() {
-    private val readyGate = QualityStabilityGate(TrackACaptureConfig.readyStableMs)
     private val detectionGate = QualityStabilityGate(TrackACaptureConfig.detectionStableMs)
     private val autoGate = QualityStabilityGate(TrackACaptureConfig.autoCaptureHoldMs)
     private val livenessFrames = ArrayDeque<Bitmap>()
@@ -62,11 +61,12 @@ class TrackAViewModel(
     private var lastCoverageRatio: Double = 0.0
     private var lastStabilityVariance: Double = DefaultConfig.value.stabilityMax + 1
     private var previousCenter: Pair<Float, Float>? = null
+    private var lastSmoothedCenter: Pair<Float, Float>? = null
     private var lastLumaTimestamp: Long = 0L
     private var avgLumaIntervalMs: Double = 0.0
-    private var readyPassCount: Int = 0
-    private var readyFailCount: Int = 0
     private var readyState: Boolean = false
+    private val readyWindow = ArrayDeque<Boolean>()
+    private val hardFailWindow = ArrayDeque<Boolean>()
     private val frameLock = Any()
     private val frameBuffer = TreeMap<Long, SyncFrame>()
     private var lastEvaluatedFrameMs: Long = 0L
@@ -85,6 +85,8 @@ class TrackAViewModel(
     private var lastCaptureMs: Long = 0L
     private var captureInFlight: Boolean = false
     private var lastCaptureSource: CaptureSource? = null
+    private var currentCaptureMode: String = "full_hand"
+    private var lastFingertipModeAt: Long = 0L
 
     init {
         fingerDetector.initialize()
@@ -120,6 +122,8 @@ class TrackAViewModel(
     fun onLumaMetrics(
         blurScore: Double,
         illuminationMean: Double,
+        edgeDensity: Double,
+        textureVariance: Double,
         roi: Rect,
         frameWidth: Int,
         frameHeight: Int,
@@ -133,6 +137,8 @@ class TrackAViewModel(
             timestampMillis = timestampMillis,
             blurScore = blurScore,
             illuminationMean = illuminationMean,
+            edgeDensity = edgeDensity,
+            textureVariance = textureVariance,
             roi = roi,
             frameWidth = frameWidth,
             frameHeight = frameHeight,
@@ -169,7 +175,7 @@ class TrackAViewModel(
         guideRoi: Rect,
         timestampMillis: Long,
     ): Rect? {
-        if (timestampMillis - lastDetectionMillis > 450L) return null
+        if (timestampMillis - lastDetectionMillis > TrackACaptureConfig.landmarkStaleMs) return null
         val detection = latestDetection ?: return null
         val points = detection.landmarks
         val rect = if (points.isNotEmpty()) {
@@ -247,75 +253,108 @@ class TrackAViewModel(
         captureInternal(CaptureSource.MANUAL)
     }
 
-    fun onAutoCaptureCompleted(success: Boolean) {
+    fun onAutoCaptureFailure() {
         captureInFlight = false
-        val notice = if (success) "Auto captured" else "Auto capture failed"
         _uiState.value = _uiState.value.copy(
             autoCaptureRequested = false,
-            captureNotice = notice,
+            captureNotice = "Auto capture failed",
             captureSource = CaptureSource.AUTO,
         )
-        if (!success) {
-            perfTracker.buildAndReset("auto_capture_failed")
-        }
+        perfTracker.buildAndReset("auto_capture_failed")
         viewModelScope.launch {
             kotlinx.coroutines.delay(1200L)
             _uiState.value = _uiState.value.copy(captureNotice = null)
         }
     }
 
-    fun captureFromBitmap(bitmap: Bitmap) {
+    fun captureFromBitmap(bitmap: Bitmap, source: CaptureSource = CaptureSource.MANUAL) {
+        if (captureInFlight && source != CaptureSource.AUTO) return
+        if (!captureInFlight) {
+            captureInFlight = true
+        }
+        lastCaptureMs = System.currentTimeMillis()
+        lastCaptureSource = source
+        val captureMode = currentCaptureMode
+        val notice = if (source == CaptureSource.AUTO) "Auto capture" else "Captured"
+        _uiState.value = _uiState.value.copy(
+            captureNotice = notice,
+            captureSource = source,
+            autoCaptureRequested = false,
+        )
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1200L)
+            _uiState.value = _uiState.value.copy(captureNotice = null)
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val roi = buildGuideRoi(bitmap.width, bitmap.height)
-            val now = System.currentTimeMillis()
-            val detection = latestDetection?.takeIf { now - lastDetectionMillis <= 700L }
-                ?: fingerDetector.detectFinger(bitmap)
-            val effectiveRoi = roi
-            val qualityResult = qualityAnalyzer.analyze(bitmap, effectiveRoi, System.currentTimeMillis())
+            try {
+                val roi = buildGuideRoi(bitmap.width, bitmap.height)
+                val now = System.currentTimeMillis()
+                val detection = latestDetection?.takeIf { now - lastDetectionMillis <= 700L }
+                    ?: fingerDetector.detectFinger(bitmap)
+                val effectiveRoi = roi
+                val captureQuality = _uiState.value.qualityResult
+                    ?: qualityAnalyzer.analyze(bitmap, effectiveRoi, System.currentTimeMillis())
 
-            _uiState.value = _uiState.value.copy(
-                qualityResult = qualityResult,
-                detection = detection,
-            )
+                _uiState.value = _uiState.value.copy(
+                    qualityResult = captureQuality,
+                    detection = detection,
+                )
 
-            val tenantId = authManager.activeTenant.value.id
-            val session = when (val created = sessionRepository.createSession(tenantId)) {
-                is AppResult.Success -> created.value
-                is AppResult.Error -> return@launch
+                val tenantId = authManager.activeTenant.value.id
+                val session = when (val created = sessionRepository.createSession(tenantId)) {
+                    is AppResult.Success -> created.value
+                    is AppResult.Error -> return@launch
+                }
+
+                val rawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, bitmap)
+                if (rawResult is AppResult.Error) return@launch
+
+                val roiBitmap = Bitmap.createBitmap(
+                    bitmap,
+                    effectiveRoi.left,
+                    effectiveRoi.top,
+                    effectiveRoi.width(),
+                    effectiveRoi.height(),
+                )
+                val stillDetection = fingerDetector.detectFingerStill(roiBitmap)
+                val segmentation = fingerMasker.segmentFingertips(roiBitmap, stillDetection)
+                val segmentedBitmap = segmentation?.masked ?: roiBitmap
+                sessionRepository.saveBitmap(session, ArtifactFilenames.SEGMENTED, segmentedBitmap)
+                val croppedRoi = fingerMasker.cropToFingertips(segmentedBitmap, roiBitmap)
+                val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, croppedRoi)
+                if (roiResult is AppResult.Error) return@launch
+
+                val perf = perfTracker.buildAndReset("manual_capture")
+                val reportMetrics = if (captureMode == "fingertip_only") {
+                    captureQuality.metrics.copy(
+                        coverageRatio = max(
+                            captureQuality.metrics.coverageRatio,
+                            DefaultConfig.value.coverageMin,
+                        ),
+                    )
+                } else {
+                    captureQuality.metrics
+                }
+                val reportEval = QualityEvaluator.evaluate(reportMetrics, DefaultConfig.value)
+                val qualityReport = QualityReport(
+                    sessionId = session.sessionId,
+                    timestamp = System.currentTimeMillis(),
+                    score0To100 = reportEval.score0To100,
+                    pass = reportEval.pass,
+                    metrics = reportMetrics,
+                    topReason = reportEval.topReason,
+                    captureMode = captureMode,
+                    performance = perf,
+                )
+                sessionRepository.saveJson(session, ArtifactFilenames.QUALITY, qualityReport)
+
+                _uiState.value = _uiState.value.copy(
+                    lastSessionId = session.sessionId,
+                    captureSource = source,
+                )
+            } finally {
+                captureInFlight = false
             }
-
-            val rawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, bitmap)
-            if (rawResult is AppResult.Error) return@launch
-
-            val roiBitmap = Bitmap.createBitmap(
-                bitmap,
-                effectiveRoi.left,
-                effectiveRoi.top,
-                effectiveRoi.width(),
-                effectiveRoi.height(),
-            )
-            val maskedRoi = if (detection.landmarks.isNotEmpty()) {
-                fingerMasker.applyFingerTipMask(roiBitmap, detection.landmarks, roi, bitmap.width, bitmap.height)
-            } else {
-                fingerMasker.applyMask(roiBitmap)
-            }
-            val croppedRoi = fingerMasker.cropToFingertips(maskedRoi, roiBitmap)
-            val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, croppedRoi)
-            if (roiResult is AppResult.Error) return@launch
-
-            val perf = perfTracker.buildAndReset("manual_capture")
-            val qualityReport = QualityReport(
-                sessionId = session.sessionId,
-                timestamp = System.currentTimeMillis(),
-                score0To100 = qualityResult.score0To100,
-                pass = qualityResult.pass,
-                metrics = qualityResult.metrics,
-                topReason = qualityResult.topReason,
-                performance = perf,
-            )
-            sessionRepository.saveJson(session, ArtifactFilenames.QUALITY, qualityReport)
-
-            _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
         }
     }
 
@@ -333,8 +372,13 @@ class TrackAViewModel(
         captureInFlight = true
         lastCaptureMs = System.currentTimeMillis()
         lastCaptureSource = source
-        val notice = if (source == CaptureSource.AUTO) "Auto captured" else "Captured"
-        _uiState.value = _uiState.value.copy(captureNotice = notice, captureSource = source)
+        val captureMode = currentCaptureMode
+        val notice = if (source == CaptureSource.AUTO) "Auto capture" else "Captured"
+        _uiState.value = _uiState.value.copy(
+            captureNotice = notice,
+            captureSource = source,
+            autoCaptureRequested = false,
+        )
         viewModelScope.launch {
             kotlinx.coroutines.delay(1200L)
             _uiState.value = _uiState.value.copy(captureNotice = null)
@@ -356,23 +400,34 @@ class TrackAViewModel(
                     roi.width(),
                     roi.height(),
                 )
-                val maskedRoi = if (detection != null && detection.landmarks.isNotEmpty()) {
-                    fingerMasker.applyFingerTipMask(roiBitmap, detection.landmarks, roi, frame.width, frame.height)
-                } else {
-                    fingerMasker.applyMask(roiBitmap)
-                }
-                val croppedRoi = fingerMasker.cropToFingertips(maskedRoi, roiBitmap)
+                val stillDetection = fingerDetector.detectFingerStill(roiBitmap)
+                val segmentation = fingerMasker.segmentFingertips(roiBitmap, stillDetection)
+                val segmentedBitmap = segmentation?.masked ?: roiBitmap
+                sessionRepository.saveBitmap(session, ArtifactFilenames.SEGMENTED, segmentedBitmap)
+                val croppedRoi = fingerMasker.cropToFingertips(segmentedBitmap, roiBitmap)
                 val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, croppedRoi)
                 if (roiResult is AppResult.Error) return@launch
 
                 val perf = perfTracker.buildAndReset("capture_internal")
+                val reportMetrics = if (captureMode == "fingertip_only") {
+                    qualityResult.metrics.copy(
+                        coverageRatio = max(
+                            qualityResult.metrics.coverageRatio,
+                            DefaultConfig.value.coverageMin,
+                        ),
+                    )
+                } else {
+                    qualityResult.metrics
+                }
+                val reportEval = QualityEvaluator.evaluate(reportMetrics, DefaultConfig.value)
                 val qualityReport = QualityReport(
                     sessionId = session.sessionId,
                     timestamp = System.currentTimeMillis(),
-                    score0To100 = qualityResult.score0To100,
-                    pass = qualityResult.pass,
-                    metrics = qualityResult.metrics,
-                    topReason = qualityResult.topReason,
+                    score0To100 = reportEval.score0To100,
+                    pass = reportEval.pass,
+                    metrics = reportMetrics,
+                    topReason = reportEval.topReason,
+                    captureMode = captureMode,
                     performance = perf,
                 )
                 sessionRepository.saveJson(session, ArtifactFilenames.QUALITY, qualityReport)
@@ -397,26 +452,13 @@ class TrackAViewModel(
 
     private fun evaluateReadyRaw(
         detectionStable: Boolean,
-        centerScore: Int,
         focusScore: Int,
         lightScore: Int,
         steadyScore: Int,
-        scaleOk: Boolean,
         timestampMillis: Long,
     ): Boolean {
         if (!detectionStable) {
             logBlocker("READY", "Detection unstable or missing")
-            focusRequested = false
-            return false
-        }
-        val centerOk = if (lastReady) centerScore >= TrackACaptureConfig.centerExitScore else centerScore >= TrackACaptureConfig.centerEnterScore
-        if (!centerOk) {
-            logBlocker("READY", "Center score $centerScore below threshold")
-            focusRequested = false
-            return false
-        }
-        if (!scaleOk) {
-            logBlocker("READY", "Finger scale below threshold")
             focusRequested = false
             return false
         }
@@ -503,14 +545,14 @@ class TrackAViewModel(
     }
 
     fun landmarkCadenceMs(blurScore: Double, lightScore: Double, nowMillis: Long): Long {
-        val detectionFresh = nowMillis - lastDetectionMillis <= 450L
+        val detectionFresh = nowMillis - lastDetectionMillis <= TrackACaptureConfig.landmarkStaleMs
         val focusScore = scoreFocus(blurScore)
         val lightScorePct = scoreLight(lightScore)
-        val lowQuality = focusScore < 35 || lightScorePct < 35
+        val lowQuality = focusScore < 40 || lightScorePct < 40
         return when {
-            !detectionFresh -> 60L
-            lowQuality -> 180L
-            else -> 130L
+            !detectionFresh -> 70L
+            lowQuality -> 120L
+            else -> 100L
         }
     }
 
@@ -522,8 +564,6 @@ class TrackAViewModel(
     }
 
     private fun computeGlarePercent(bitmap: Bitmap, roi: Rect): Double {
-        val width = bitmap.width
-        val height = bitmap.height
         if (roi.width() <= 0 || roi.height() <= 0) return 0.0
         val pixels = IntArray(roi.width() * roi.height())
         bitmap.getPixels(pixels, 0, roi.width(), roi.left, roi.top, roi.width(), roi.height())
@@ -538,6 +578,18 @@ class TrackAViewModel(
         return bright.toDouble() / pixels.size.toDouble()
     }
 
+    private fun isFingertipTexture(edgeDensity: Double, textureVariance: Double, meanIntensity: Double): Boolean {
+        if (meanIntensity < 20.0 || meanIntensity > 235.0) return false
+        if (textureVariance < TrackACaptureConfig.fingerTextureVarianceObviousMin) return false
+        if (meanIntensity < TrackACaptureConfig.fingerIntensityMin ||
+            meanIntensity > TrackACaptureConfig.fingerIntensityMax
+        ) {
+            return false
+        }
+        return edgeDensity >= TrackACaptureConfig.fingerEdgeDensityMin &&
+            textureVariance >= TrackACaptureConfig.fingerTextureVarianceMin
+    }
+
     private fun logBlocker(tag: String, message: String) {
         android.util.Log.d("TrackA/$tag", message)
     }
@@ -546,6 +598,8 @@ class TrackAViewModel(
         timestampMillis: Long,
         blurScore: Double,
         illuminationMean: Double,
+        edgeDensity: Double,
+        textureVariance: Double,
         roi: Rect,
         frameWidth: Int,
         frameHeight: Int,
@@ -556,6 +610,8 @@ class TrackAViewModel(
                 .copy(
                     blurScore = blurScore,
                     illuminationMean = illuminationMean,
+                    edgeDensity = edgeDensity,
+                    textureVariance = textureVariance,
                     roi = roi,
                     frameWidth = frameWidth,
                     frameHeight = frameHeight,
@@ -625,7 +681,7 @@ class TrackAViewModel(
         val coverage = computeCoverageRatio(detection, frame.roi, frame.frameWidth, frame.frameHeight)
         lastCoverageRatio = coverage
         val centerPoint = computeDetectionCenter(detection, frame.roi, frame.frameWidth, frame.frameHeight)
-        val stabilityVariance = computeStabilityVariance(centerPoint)
+        val stabilityVariance = computeStabilityVariance(centerPoint, frame.roi)
         lastStabilityVariance = stabilityVariance
 
         val metrics = QualityMetrics(
@@ -645,28 +701,87 @@ class TrackAViewModel(
         )
 
         val presenceCoverage = coverage >= TrackACaptureConfig.coverageEnter
-        val detectionFresh = frame.timestamp - lastDetectionMillis <= 450L
-        val detectionPass = detectionFresh && detection.isDetected &&
-            (detection.landmarks.isNotEmpty() || (detection.boundingBox != null && presenceCoverage))
-        val detectionStable = detectionGate.update(detectionPass, frame.timestamp)
-
-        val centerScore = computeCenterScore(detection, frame.roi, frame.frameWidth, frame.frameHeight)
-        val centerValid = centerScore > 0
+        val detectionFresh = frame.timestamp - lastDetectionMillis <= TrackACaptureConfig.landmarkStaleMs
+        val landmarkStaleDuration = if (lastLandmarkMillis == 0L) Long.MAX_VALUE else frame.timestamp - lastLandmarkMillis
         val focusScore = scoreFocus(frame.blurScore)
         val lightScore = scoreLight(frame.illuminationMean)
-        val steadyScore = scoreSteady(stabilityVariance)
+        val steadyScoreRaw = scoreSteady(stabilityVariance)
+        val focusThreshold = if (lastReady) TrackACaptureConfig.focusExitScore else TrackACaptureConfig.focusEnterScore
+        val lightThreshold = if (lastReady) TrackACaptureConfig.lightExitScore else TrackACaptureConfig.lightEnterScore
+        val steadyThreshold = if (lastReady) TrackACaptureConfig.steadyExitScore else TrackACaptureConfig.steadyEnterScore
+        val qualityGood = focusScore >= focusThreshold &&
+            lightScore >= lightThreshold &&
+            steadyScoreRaw >= steadyThreshold
+        val qualityGoodForFingertip = focusScore >= focusThreshold && lightScore >= lightThreshold
+        val fingertipTextureOk = isFingertipTexture(frame.edgeDensity, frame.textureVariance, frame.illuminationMean)
+        val weakDetection = detection.isDetected &&
+            detection.landmarks.isEmpty() &&
+            detection.boundingBox == null
+
+        val centerScoreRaw = computeCenterScore(detection, frame.roi, frame.frameWidth, frame.frameHeight)
         val fingerScalePx = computeFingerScalePx(detection, frame.frameWidth, frame.frameHeight)
-        val scaleOk = fingerScalePx >= TrackACaptureConfig.minFingerScalePx
+        val scaleRatio = if (frame.roi.width() > 0) fingerScalePx / frame.roi.width().toFloat() else 0f
+        val geometryPoor = detection.isDetected && (
+            coverage < TrackACaptureConfig.coverageExit ||
+                centerScoreRaw == 0 ||
+                scaleRatio > TrackACaptureConfig.scaleMax
+            )
+        val missingGeometry = !detection.isDetected || weakDetection || geometryPoor
+        val noHandButTexture = missingGeometry && fingertipTextureOk
+        val noHandButQuality = missingGeometry && qualityGoodForFingertip
+        val fingertipModeRaw = (landmarkStaleDuration >= TrackACaptureConfig.fingertipModeDelayMs &&
+            (fingertipTextureOk || qualityGoodForFingertip)) ||
+            noHandButTexture || noHandButQuality
+        if (fingertipModeRaw) {
+            lastFingertipModeAt = frame.timestamp
+        }
+        val fingertipMode = fingertipModeRaw ||
+            (frame.timestamp - lastFingertipModeAt) <= TrackACaptureConfig.fingertipModeHoldMs
+        currentCaptureMode = if (fingertipMode) "fingertip_only" else "full_hand"
+        val detectionPass = if (fingertipMode) {
+            true
+        } else {
+            detectionFresh && detection.isDetected &&
+                (detection.landmarks.isNotEmpty() || (detection.boundingBox != null && presenceCoverage))
+        }
+        val detectionStable = detectionGate.update(detectionPass, frame.timestamp)
+
+        val centerScore = if (fingertipMode && centerScoreRaw == 0) 100 else centerScoreRaw
+        val centerValid = if (fingertipMode) true else centerScore > 0
+        val steadyScore = if (fingertipMode && steadyScoreRaw < steadyThreshold) {
+            steadyThreshold
+        } else {
+            steadyScoreRaw
+        }
+        val scaleScore = computeScaleScore(scaleRatio)
+        val centerScoreNorm = (centerScore / 100.0).coerceIn(0.0, 1.0)
+        val coverageScore = ((coverage - TrackACaptureConfig.coverageSoftMin) / TrackACaptureConfig.coverageSoftRange)
+            .coerceIn(0.0, 1.0)
+        val softScore = (centerScoreNorm * 0.50) + (scaleScore * 0.40) + (coverageScore * 0.10)
+        val centerThreshold = if (lastReady) TrackACaptureConfig.centerExitScore else TrackACaptureConfig.centerEnterScore
+        val softThreshold = if (perfTracker.elapsedSinceStart(frame.timestamp) >= TrackACaptureConfig.relaxAfterMs) {
+            TrackACaptureConfig.softScoreThresholdRelaxed
+        } else {
+            TrackACaptureConfig.softScoreThreshold
+        }
 
         val readyRaw = evaluateReadyRaw(
             detectionStable = detectionStable,
-            centerScore = centerScore,
             focusScore = focusScore,
             lightScore = lightScore,
             steadyScore = steadyScore,
-            scaleOk = scaleOk,
             timestampMillis = frame.timestamp,
         )
+        val hardFail = (!fingertipMode && !detection.isDetected) ||
+            focusScore < TrackACaptureConfig.focusHardFailScore ||
+            lightScore < TrackACaptureConfig.lightHardFailScore ||
+            steadyScore < TrackACaptureConfig.steadyHardFailScore
+        val readySample = readyRaw && detectionPass && (fingertipMode || softScore >= softThreshold)
+
+        pushWindow(readyWindow, readySample, TrackACaptureConfig.readyWindowSize)
+        pushWindow(hardFailWindow, hardFail, TrackACaptureConfig.hardFailWindowSize)
+        val passCount = readyWindow.count { it }
+        val hardFailRecent = hardFailWindow.any { it }
         val delta = if (lastLumaTimestamp == 0L) null else frame.timestamp - lastLumaTimestamp
         if (delta != null) {
             avgLumaIntervalMs = if (avgLumaIntervalMs == 0.0) {
@@ -676,26 +791,14 @@ class TrackAViewModel(
             }
         }
         lastLumaTimestamp = frame.timestamp
-        val requireCount = avgLumaIntervalMs > 0.0 && avgLumaIntervalMs <= 45.0
-        if (readyRaw) {
-            readyPassCount++
-            readyFailCount = 0
-        } else {
-            readyFailCount++
-            readyPassCount = 0
-        }
-        val readyByTime = readyGate.update(readyRaw, frame.timestamp)
-        val readyByCount = !requireCount || readyPassCount >= TrackACaptureConfig.readyPassCount
-
+        val wasReady = readyState
         if (!readyState) {
-            if (readyRaw && readyByTime && readyByCount) {
+            if (passCount >= TrackACaptureConfig.readyEnterCount && !hardFailRecent) {
                 readyState = true
                 perfTracker.onReady()
             }
-        } else if (!readyRaw) {
-            if (!requireCount || readyFailCount >= TrackACaptureConfig.readyFailCount) {
-                readyState = false
-            }
+        } else if (passCount <= TrackACaptureConfig.readyExitCount || hardFailRecent) {
+            readyState = false
         }
         lastReady = readyState
 
@@ -704,7 +807,10 @@ class TrackAViewModel(
 
         if (!detectionPass) {
             result = result.copy(pass = false, topReason = "No finger detected")
-            previousCenter = null
+            if (!detection.isDetected) {
+                previousCenter = null
+                lastSmoothedCenter = null
+            }
         }
 
         _uiState.value = _uiState.value.copy(
@@ -722,16 +828,31 @@ class TrackAViewModel(
             fingerScalePx = fingerScalePx,
             focusRequested = focusRequested,
             message = when {
+                combinedPass -> null
                 livenessEnabled && !livenessPass -> "Liveness failed"
-                !detectionPass -> "No finger detected"
-                !scaleOk -> "Move closer to the camera"
-                !centerValid -> "Centering required"
+                fingertipMode -> "Close-up mode - hold still"
+                !detectionFresh && fingertipTextureOk -> "Close-up mode - hold still"
+                !detectionFresh -> "Keep hand in view"
+                noHandButTexture || noHandButQuality -> "Close-up mode - hold still"
+                missingGeometry -> "Move fingers into the box"
+                scaleRatio > TrackACaptureConfig.scaleMax -> "Move back slightly"
+                scaleRatio < TrackACaptureConfig.scaleMin -> "Move closer to the camera"
+                detection.isDetected && coverage < TrackACaptureConfig.coverageEnter -> "Move fingers into the box"
+                !centerValid || centerScore < centerThreshold -> "Center fingers in guide"
+                focusScore < focusThreshold -> "Hold steady for focus"
+                lightScore < lightThreshold -> "Add more light or flash"
+                steadyScore < steadyThreshold -> "Hold still"
+                softScore < softThreshold -> "Adjust hand position"
                 else -> null
             },
         )
 
-        if (combinedPass && autoCaptureEnabled) {
-            val canAutoCapture = autoGate.update(true, frame.timestamp)
+        val allowAutoCapture = autoCaptureEnabled || TrackACaptureConfig.forceAutoCapture
+        val autoCandidate = combinedPass
+        val autoEligible = autoGate.update(autoCandidate, frame.timestamp)
+        if (allowAutoCapture) {
+            val immediate = readyState && !wasReady
+            val canAutoCapture = immediate || autoEligible
             if (canAutoCapture && !captureInFlight && frame.timestamp - lastCaptureMs > TrackACaptureConfig.autoCaptureCooldownMs) {
                 captureInFlight = true
                 lastCaptureMs = frame.timestamp
@@ -741,8 +862,6 @@ class TrackAViewModel(
                     captureSource = CaptureSource.AUTO,
                 )
             }
-        } else {
-            autoGate.update(false, frame.timestamp)
         }
     }
 
@@ -787,6 +906,8 @@ class TrackAViewModel(
         val timestamp: Long,
         val blurScore: Double = 0.0,
         val illuminationMean: Double = 0.0,
+        val edgeDensity: Double = 0.0,
+        val textureVariance: Double = 0.0,
         val roi: Rect = Rect(),
         val frameWidth: Int = 0,
         val frameHeight: Int = 0,
@@ -794,7 +915,7 @@ class TrackAViewModel(
         val hasLuma: Boolean = false,
         val hasDetection: Boolean = false,
     ) {
-        val isComplete: Boolean get() = hasLuma && hasDetection
+        val isComplete: Boolean get() = hasLuma
     }
 
     private class CapturePerfTracker {
@@ -858,6 +979,10 @@ class TrackAViewModel(
             steadySum = 0.0
             return perf
         }
+
+        fun elapsedSinceStart(nowMillis: Long): Long {
+            return if (captureStartMs == 0L) 0L else (nowMillis - captureStartMs)
+        }
     }
     private fun computeCoverageRatio(
         detection: FingerDetectionResult,
@@ -865,6 +990,22 @@ class TrackAViewModel(
         width: Int,
         height: Int,
     ): Double {
+        val tips = detection.landmarks.filter {
+            it.type in listOf(
+                LandmarkType.INDEX_TIP,
+                LandmarkType.MIDDLE_TIP,
+                LandmarkType.RING_TIP,
+                LandmarkType.PINKY_TIP,
+            )
+        }
+        if (tips.isNotEmpty()) {
+            val inside = tips.count { tip ->
+                val x = tip.x * width
+                val y = tip.y * height
+                x >= roi.left && x <= roi.right && y >= roi.top && y <= roi.bottom
+            }
+            return inside.toDouble() / tips.size.toDouble()
+        }
         val bbox = detection.boundingBox ?: return 0.0
         val roiLeft = roi.left.toFloat() / width
         val roiTop = roi.top.toFloat() / height
@@ -881,13 +1022,15 @@ class TrackAViewModel(
         return if (roiArea > 0f) (interArea / roiArea).toDouble() else 0.0
     }
 
-    private fun computeStabilityVariance(center: Pair<Float, Float>?): Double {
+    private fun computeStabilityVariance(center: Pair<Float, Float>?, roi: Rect): Double {
         val prev = previousCenter
         previousCenter = center
-        if (center == null || prev == null) {
+        if (center == null || prev == null || roi.width() <= 0 || roi.height() <= 0) {
             return DefaultConfig.value.stabilityMax + 1
         }
-        return hypot((center.first - prev.first).toDouble(), (center.second - prev.second).toDouble())
+        val dx = (center.first - prev.first) / roi.width().toDouble()
+        val dy = (center.second - prev.second) / roi.height().toDouble()
+        return hypot(dx, dy) * 100.0
     }
 
     private fun computeDetectionCenter(
@@ -904,7 +1047,7 @@ class TrackAViewModel(
                 com.sitta.core.vision.LandmarkType.PINKY_TIP,
             )
         }
-        return if (tipPoints.isNotEmpty()) {
+        val rawCenter = if (tipPoints.isNotEmpty()) {
             val avgX = tipPoints.map { it.x }.average().toFloat() * width
             val avgY = tipPoints.map { it.y }.average().toFloat() * height
             Pair(avgX, avgY)
@@ -915,6 +1058,23 @@ class TrackAViewModel(
                 (boundingBox.top + boundingBox.bottom) / 2f * height,
             )
         }
+        val prev = lastSmoothedCenter
+        if (prev == null) {
+            lastSmoothedCenter = rawCenter
+            return rawCenter
+        }
+        val deadband = roi.width().toFloat() * 0.003f
+        val dx = rawCenter.first - prev.first
+        val dy = rawCenter.second - prev.second
+        if (kotlin.math.sqrt(dx * dx + dy * dy) < deadband) {
+            return prev
+        }
+        val smoothed = Pair(
+            (prev.first * 0.75f) + (rawCenter.first * 0.25f),
+            (prev.second * 0.75f) + (rawCenter.second * 0.25f),
+        )
+        lastSmoothedCenter = smoothed
+        return smoothed
     }
 
     private fun computeCenterScore(
@@ -934,6 +1094,27 @@ class TrackAViewModel(
         val dy = (center.second - roiCenterY) / roi.height()
         val dist = kotlin.math.sqrt(dx * dx + dy * dy)
         return ((1.0 - (dist / 0.75)).coerceIn(0.0, 1.0) * 100).toInt()
+    }
+
+    private fun computeScaleScore(ratio: Float): Double {
+        val min = TrackACaptureConfig.scaleMin
+        val idealMin = TrackACaptureConfig.scaleIdealMin
+        val idealMax = TrackACaptureConfig.scaleIdealMax
+        val max = TrackACaptureConfig.scaleMax
+        return when {
+            ratio <= min -> 0.0
+            ratio < idealMin -> ((ratio - min) / (idealMin - min)).toDouble()
+            ratio <= idealMax -> 1.0
+            ratio < max -> (1.0 - ((ratio - idealMax) / (max - idealMax))).toDouble()
+            else -> 0.0
+        }.coerceIn(0.0, 1.0)
+    }
+
+    private fun pushWindow(window: ArrayDeque<Boolean>, value: Boolean, maxSize: Int) {
+        window.addLast(value)
+        while (window.size > maxSize) {
+            window.removeFirst()
+        }
     }
 
 }

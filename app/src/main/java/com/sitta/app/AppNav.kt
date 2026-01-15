@@ -58,6 +58,8 @@ fun SittaApp(container: AppContainer) {
                 authManager = container.authManager,
                 enhancementPipeline = container.enhancementPipeline,
                 qualityAnalyzer = container.qualityAnalyzer,
+                ridgeExtractor = container.fingerRidgeExtractor,
+                skeletonizer = container.fingerSkeletonizer,
                 onBack = { navController.popBackStack("home", inclusive = false) },
             )
         }

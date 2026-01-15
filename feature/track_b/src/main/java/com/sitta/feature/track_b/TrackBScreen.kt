@@ -27,7 +27,8 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -56,12 +57,22 @@ class TrackBViewModelFactory(
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
     private val qualityAnalyzer: QualityAnalyzer,
+    private val ridgeExtractor: com.sitta.core.vision.FingerRidgeExtractor,
+    private val skeletonizer: com.sitta.core.vision.FingerSkeletonizer,
     private val appContext: android.content.Context,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TrackBViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TrackBViewModel(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer, appContext) as T
+            return TrackBViewModel(
+                sessionRepository,
+                authManager,
+                enhancementPipeline,
+                qualityAnalyzer,
+                ridgeExtractor,
+                skeletonizer,
+                appContext,
+            ) as T
         }
         error("Unknown ViewModel class")
     }
@@ -73,6 +84,8 @@ fun TrackBScreen(
     authManager: AuthManager,
     enhancementPipeline: EnhancementPipeline,
     qualityAnalyzer: QualityAnalyzer,
+    ridgeExtractor: com.sitta.core.vision.FingerRidgeExtractor,
+    skeletonizer: com.sitta.core.vision.FingerSkeletonizer,
     onBack: () -> Unit,
 ) {
     val viewModel: TrackBViewModel = viewModel(
@@ -81,6 +94,8 @@ fun TrackBScreen(
             authManager,
             enhancementPipeline,
             qualityAnalyzer,
+            ridgeExtractor,
+            skeletonizer,
             LocalContext.current.applicationContext,
         ),
     )
@@ -127,6 +142,12 @@ fun TrackBScreen(
                 ImagePane(title = "RAW", bitmap = uiState.rawBitmap, modifier = Modifier.weight(1f))
                 ImagePane(title = "ENHANCED", bitmap = uiState.enhancedBitmap, modifier = Modifier.weight(1f))
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            ImagePane(
+                title = "SKELETON",
+                bitmap = uiState.skeletonBitmap ?: uiState.ridgeBitmap,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -145,53 +166,25 @@ fun TrackBScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        DarkCard {
-            Text(text = "Sharpening", color = Color(0xFF93A3B5), fontSize = 12.sp)
-            Spacer(modifier = Modifier.height(6.dp))
-            Slider(
-                value = uiState.sharpenStrength,
-                onValueChange = { viewModel.updateSharpenStrength(it) },
-                valueRange = 0f..2f,
-            )
+        val message = uiState.message
+        val errorMessage = message?.takeIf {
+            it.contains("failed", ignoreCase = true) || it.contains("not found", ignoreCase = true)
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        SectionTitle(text = "Quality Metrics")
-        Spacer(modifier = Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MetricCard(
-                title = "Quality Score",
-                value = "${uiState.qualityResult?.score0To100 ?: 0}%",
-                modifier = Modifier.weight(1f),
-                accent = Color(0xFF34D399),
+        if (errorMessage != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.clearMessage() },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.clearMessage() }) {
+                        Text(text = "OK", color = Color(0xFF14B8A6))
+                    }
+                },
+                title = { Text(text = "Enhancement Error", color = Color.White) },
+                text = { Text(text = errorMessage, color = Color(0xFFCBD5F5)) },
+                containerColor = Color(0xFF1C1F24),
             )
-            MetricCard(
-                title = "Blur Score",
-                value = uiState.qualityResult?.metrics?.blurScore?.let { "%.1f".format(it) } ?: "--",
-                modifier = Modifier.weight(1f),
-                accent = Color(0xFF60A5FA),
-            )
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MetricCard(
-                title = "Illumination",
-                value = uiState.qualityResult?.metrics?.illuminationMean?.let { "%.1f".format(it) } ?: "--",
-                modifier = Modifier.weight(1f),
-                accent = Color(0xFFFBBF24),
-            )
-            MetricCard(
-                title = "Coverage",
-                value = uiState.qualityResult?.metrics?.coverageRatio?.let { "%.2f".format(it) } ?: "--",
-                modifier = Modifier.weight(1f),
-                accent = Color(0xFF7C3AED),
-            )
-        }
-
-        uiState.message?.let {
+        } else if (message != null) {
             Spacer(modifier = Modifier.height(12.dp))
-            ErrorBanner(message = it)
+            ErrorBanner(message = message)
         }
 
         Spacer(modifier = Modifier.height(20.dp))

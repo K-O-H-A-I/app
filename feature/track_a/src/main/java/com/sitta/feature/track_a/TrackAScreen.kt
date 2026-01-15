@@ -206,9 +206,19 @@ fun TrackAScreen(
                     val luma = extractRoiLumaInto(imageProxy, roi, lumaScratch)
                     val blur = computeLaplacianVarianceFast(luma.luma, luma.width, luma.height)
                     val illumination = luma.mean
+                    val innerRoi = insetRect(roi, 0.15f)
+                    val textureLuma = if (innerRoi.width() > 0 && innerRoi.height() > 0) {
+                        extractRoiLumaInto(imageProxy, innerRoi, lumaScratch)
+                    } else {
+                        luma
+                    }
+                    val edgeDensity = computeEdgeDensity(textureLuma.luma, textureLuma.width, textureLuma.height)
+                    val textureVariance = computeTextureVarianceNormalized(textureLuma.luma, textureLuma.width, textureLuma.height)
                     viewModel.onLumaMetrics(
                         blurScore = blur,
                         illuminationMean = illumination,
+                        edgeDensity = edgeDensity,
+                        textureVariance = textureVariance,
                         roi = roi,
                         frameWidth = imageProxy.width,
                         frameHeight = imageProxy.height,
@@ -217,21 +227,22 @@ fun TrackAScreen(
 
                     val cadenceMs = viewModel.landmarkCadenceMs(blur, illumination, now)
                     if (now - lastLandmarkAtMs >= cadenceMs) {
+                        val submitTs = maxOf(now, lastLandmarkAtMs + 1)
                         val crop = viewModel.computeLandmarkCropRect(
                             frameWidth = imageProxy.width,
                             frameHeight = imageProxy.height,
                             guideRoi = roi,
-                            timestampMillis = now,
+                            timestampMillis = submitTs,
                         )
                         val cropRect = crop ?: Rect(0, 0, imageProxy.width, imageProxy.height)
                         val targetMax = if (crop != null) 360 else 480
                         val bitmap = yuvConverter.toBitmap(imageProxy, cropRect, targetMax)
                         viewModel.onLandmarksFrame(
                             bitmap,
-                            now,
+                            submitTs,
                             FrameCrop(imageProxy.width, imageProxy.height, cropRect),
                         )
-                        lastLandmarkAtMs = now
+                        lastLandmarkAtMs = submitTs
                     }
                 } catch (t: Throwable) {
                     Log.w("TrackA", "Frame analysis failed", t)
@@ -286,7 +297,7 @@ fun TrackAScreen(
             if (highLightSince == 0L) highLightSince = now
             lowLightSince = 0L
             if (torchEnabled && now - highLightSince >= TrackACaptureConfig.torchDebounceMs &&
-                now - lastTorchChangeMs >= 1200L
+                now - lastTorchChangeMs >= TrackACaptureConfig.torchMinOnMs
             ) {
                 torchEnabled = false
                 lastTorchChangeMs = now
@@ -333,14 +344,13 @@ fun TrackAScreen(
                 },
             )
             if (best != null) {
-                viewModel.captureFromBitmap(best)
-                viewModel.onAutoCaptureCompleted(true)
+                viewModel.captureFromBitmap(best, CaptureSource.AUTO)
             } else {
-                viewModel.onAutoCaptureCompleted(false)
+                viewModel.onAutoCaptureFailure()
             }
         } catch (t: Throwable) {
             Log.e("TrackA", "Auto capture failed", t)
-            viewModel.onAutoCaptureCompleted(false)
+            viewModel.onAutoCaptureFailure()
         } finally {
             captureBurstInFlight = false
         }
@@ -363,8 +373,10 @@ fun TrackAScreen(
                         ),
                     ),
             )
+            val orientationAngle = uiState.detection?.orientationAngle
+            val isHorizontal = orientationAngle?.let { kotlin.math.abs(it) in 45f..135f } ?: true
             CameraOverlay(isReady = uiState.captureEnabled)
-            FingerprintGuideOverlay(visible = !uiState.captureEnabled)
+            FingerprintGuideOverlay(visible = !uiState.captureEnabled, horizontal = isHorizontal)
             if (BuildConfig.DEBUG && uiState.debugOverlayEnabled) {
                 LandmarkOverlay(landmarks = uiState.overlayLandmarks)
             }
@@ -436,7 +448,7 @@ fun TrackAScreen(
                                     },
                                 )
                                 if (best != null) {
-                                    viewModel.captureFromBitmap(best)
+                                    viewModel.captureFromBitmap(best, CaptureSource.MANUAL)
                                 } else {
                                     viewModel.capture()
                                 }
@@ -552,7 +564,7 @@ private fun CameraOverlay(isReady: Boolean) {
 }
 
 @Composable
-private fun FingerprintGuideOverlay(visible: Boolean) {
+private fun FingerprintGuideOverlay(visible: Boolean, horizontal: Boolean) {
     if (!visible) return
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val roi = buildGuideRoi(constraints.maxWidth, constraints.maxHeight)
@@ -564,22 +576,42 @@ private fun FingerprintGuideOverlay(visible: Boolean) {
                 roi.bottom.toFloat(),
             )
             val radius = (minOf(rect.width, rect.height) * 0.065f).coerceAtLeast(7.dp.toPx())
-            val baseY = rect.top + rect.height * 0.3f
-            val xSteps = listOf(0.22f, 0.40f, 0.60f, 0.78f)
-            val yOffsets = listOf(0.02f, 0.0f, -0.01f, 0.01f)
-            xSteps.forEachIndexed { index, fx ->
-                val cx = rect.left + rect.width * fx
-                val cy = baseY + rect.height * yOffsets[index]
-                drawCircle(
-                    color = Color(0xFF14B8A6).copy(alpha = 0.45f),
-                    radius = radius,
-                    center = Offset(cx, cy),
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.25f),
-                    radius = radius * 0.6f,
-                    center = Offset(cx, cy),
-                )
+            if (horizontal) {
+                val baseY = rect.top + rect.height * 0.3f
+                val xSteps = listOf(0.20f, 0.40f, 0.60f, 0.80f)
+                val yOffsets = listOf(0.02f, 0.0f, -0.01f, 0.01f)
+                xSteps.forEachIndexed { index, fx ->
+                    val cx = rect.left + rect.width * fx
+                    val cy = baseY + rect.height * yOffsets[index]
+                    drawCircle(
+                        color = Color(0xFF14B8A6).copy(alpha = 0.45f),
+                        radius = radius,
+                        center = Offset(cx, cy),
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.25f),
+                        radius = radius * 0.6f,
+                        center = Offset(cx, cy),
+                    )
+                }
+            } else {
+                val baseX = rect.left + rect.width * 0.35f
+                val ySteps = listOf(0.22f, 0.40f, 0.60f, 0.78f)
+                val xOffsets = listOf(0.02f, 0.0f, -0.01f, 0.01f)
+                ySteps.forEachIndexed { index, fy ->
+                    val cx = baseX + rect.width * xOffsets[index]
+                    val cy = rect.top + rect.height * fy
+                    drawCircle(
+                        color = Color(0xFF14B8A6).copy(alpha = 0.45f),
+                        radius = radius,
+                        center = Offset(cx, cy),
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.25f),
+                        radius = radius * 0.6f,
+                        center = Offset(cx, cy),
+                    )
+                }
             }
         }
     }
@@ -643,11 +675,12 @@ private fun StateLabel(text: String) {
 @Composable
 private fun StatusBanner(isReady: Boolean, message: String?) {
     val text = when {
-        isReady -> "✓ Ready to capture"
         message != null -> message
+        isReady -> "✓ Ready to capture"
         else -> "Adjusting..."
     }
     val color = when {
+        message?.startsWith("Auto capture") == true -> Color(0xFF34D399)
         isReady -> Color(0xFF34D399)
         message != null -> Color(0xFFFBBF24)
         else -> Color(0xFFF97316)
@@ -804,6 +837,68 @@ private fun computeLaplacianVarianceFast(luma: ByteArray, width: Int, height: In
     return if (count > 1) m2 / count.toDouble() else 0.0
 }
 
+private fun insetRect(rect: Rect, ratio: Float): Rect {
+    val dx = (rect.width() * ratio).toInt()
+    val dy = (rect.height() * ratio).toInt()
+    return Rect(
+        (rect.left + dx).coerceAtMost(rect.right),
+        (rect.top + dy).coerceAtMost(rect.bottom),
+        (rect.right - dx).coerceAtLeast(rect.left),
+        (rect.bottom - dy).coerceAtLeast(rect.top),
+    )
+}
+
+private fun computeEdgeDensity(luma: ByteArray, width: Int, height: Int): Double {
+    if (width < 3 || height < 3) return 0.0
+    var edgePixels = 0
+    var total = 0
+    val step = 2
+    val marginX = (width * 0.05f).toInt()
+    val marginY = (height * 0.05f).toInt()
+    val startX = maxOf(1, marginX)
+    val endX = (width - 1 - marginX).coerceAtLeast(startX + 1)
+    val startY = maxOf(1, marginY)
+    val endY = (height - 1 - marginY).coerceAtLeast(startY + 1)
+    for (y in startY until endY step step) {
+        val row = y * width
+        for (x in startX until endX step step) {
+            val idx = row + x
+            val gx = (luma[idx + 1].toInt() and 0xFF) - (luma[idx - 1].toInt() and 0xFF)
+            val gy = (luma[idx + width].toInt() and 0xFF) - (luma[idx - width].toInt() and 0xFF)
+            val magnitude = kotlin.math.abs(gx) + kotlin.math.abs(gy)
+            if (magnitude > 30) edgePixels++
+            total++
+        }
+    }
+    return if (total > 0) edgePixels.toDouble() / total else 0.0
+}
+
+private fun computeTextureVarianceNormalized(luma: ByteArray, width: Int, height: Int): Double {
+    if (width == 0 || height == 0) return 0.0
+    val step = 2
+    var mean = 0.0
+    var m2 = 0.0
+    var count = 0L
+    val marginX = (width * 0.05f).toInt()
+    val marginY = (height * 0.05f).toInt()
+    val startX = marginX.coerceAtLeast(0)
+    val endX = (width - marginX).coerceAtLeast(startX + 1)
+    val startY = marginY.coerceAtLeast(0)
+    val endY = (height - marginY).coerceAtLeast(startY + 1)
+    for (y in startY until endY step step) {
+        val row = y * width
+        for (x in startX until endX step step) {
+            val v = luma[row + x].toInt() and 0xFF
+            count++
+            val delta = v - mean
+            mean += delta / count.toDouble()
+            m2 += delta * (v - mean)
+        }
+    }
+    val variance = if (count > 1) m2 / count.toDouble() else 0.0
+    return (variance / 1000.0).coerceIn(0.0, 1.0)
+}
+
 private suspend fun ImageCapture.takePictureSuspend(executor: java.util.concurrent.Executor): androidx.camera.core.ImageProxy =
     suspendCancellableCoroutine { cont ->
         takePicture(
@@ -814,7 +909,7 @@ private suspend fun ImageCapture.takePictureSuspend(executor: java.util.concurre
                         image.close()
                         return
                     }
-                    cont.resume(image, null)
+                    cont.resume(image)
                 }
 
                 override fun onError(exception: ImageCaptureException) {

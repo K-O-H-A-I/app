@@ -66,7 +66,7 @@ fun TrackSelectorScreen(
     val background = if (isDark) Color(0xFF121212) else Color(0xFFF7F7F7)
     val surface = if (isDark) Color(0xFF1E1E1E) else Color.White
     val sessions = sessionRepository.listSessions(activeTenant.id)
-    val scansToday = countScansToday(sessions)
+    val scansToday = countScansToday(sessionRepository, sessions)
     val recentActivity = buildRecentActivity(sessionRepository, sessions)
 
     Column(
@@ -336,12 +336,13 @@ private fun ActivityRow(title: String, time: String) {
     }
 }
 
-private fun countScansToday(sessions: List<SessionInfo>): Int {
+private fun countScansToday(sessionRepository: SessionRepository, sessions: List<SessionInfo>): Int {
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now(zone)
     return sessions.count { session ->
         val date = Instant.ofEpochMilli(session.timestamp).atZone(zone).toLocalDate()
-        date == today
+        if (date != today) return@count false
+        sessionRepository.sessionArtifactPath(session, ArtifactFilenames.QUALITY).exists()
     }
 }
 
