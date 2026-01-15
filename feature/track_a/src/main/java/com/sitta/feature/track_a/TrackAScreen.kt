@@ -15,6 +15,9 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.view.TransformExperimental
+import androidx.camera.view.transform.CoordinateTransform
+import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -72,6 +75,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sitta.feature.track_a.BuildConfig
 import com.sitta.core.data.AuthManager
+import com.sitta.core.data.ConfigRepo
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.data.SettingsRepository
 import com.sitta.core.domain.LivenessDetector
@@ -84,6 +88,7 @@ import com.sitta.core.vision.FingerSceneAnalyzer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import android.graphics.PointF
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.withContext
@@ -93,6 +98,7 @@ import java.util.concurrent.TimeUnit
 class TrackAViewModelFactory(
     private val sessionRepository: SessionRepository,
     private val authManager: AuthManager,
+    private val configRepo: ConfigRepo,
     private val settingsRepository: SettingsRepository,
     private val qualityAnalyzer: QualityAnalyzer,
     private val livenessDetector: LivenessDetector,
@@ -106,6 +112,7 @@ class TrackAViewModelFactory(
             return TrackAViewModel(
                 sessionRepository,
                 authManager,
+                configRepo,
                 settingsRepository,
                 qualityAnalyzer,
                 livenessDetector,
@@ -122,6 +129,7 @@ class TrackAViewModelFactory(
 fun TrackAScreen(
     sessionRepository: SessionRepository,
     authManager: AuthManager,
+    configRepo: ConfigRepo,
     settingsRepository: SettingsRepository,
     qualityAnalyzer: QualityAnalyzer,
     livenessDetector: LivenessDetector,
@@ -136,6 +144,7 @@ fun TrackAScreen(
         factory = TrackAViewModelFactory(
             sessionRepository,
             authManager,
+            configRepo,
             settingsRepository,
             qualityAnalyzer,
             livenessDetector,
@@ -174,6 +183,11 @@ fun TrackAScreen(
     var lowLightSince by remember { mutableStateOf(0L) }
     var highLightSince by remember { mutableStateOf(0L) }
     var lastTorchChangeMs by remember { mutableStateOf(0L) }
+    var imageToPreviewTransform by remember { mutableStateOf<CoordinateTransform?>(null) }
+    var previewToImageTransform by remember { mutableStateOf<CoordinateTransform?>(null) }
+    var analysisSize by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var analysisCropRect by remember { mutableStateOf<Rect?>(null) }
+    val transformFactory = remember { ImageProxyTransformFactory() }
 
     DisposableEffect(lifecycleOwner, enableCamera, useFrontCamera) {
         if (!enableCamera) {
@@ -202,7 +216,31 @@ fun TrackAScreen(
             analysis.setAnalyzer(analysisExecutor) { imageProxy ->
                 try {
                     val now = System.currentTimeMillis()
-                    val roi = buildGuideRoi(imageProxy.width, imageProxy.height)
+                    @OptIn(TransformExperimental::class)
+                    val mappedRoi = run {
+                        val previewTransform = previewView.outputTransform
+                        if (previewTransform != null && previewView.width > 0 && previewView.height > 0) {
+                            val imageTransform = transformFactory.getOutputTransform(imageProxy)
+                            if (analysisSize == null ||
+                                analysisSize?.first != imageProxy.width ||
+                                analysisSize?.second != imageProxy.height
+                            ) {
+                                imageToPreviewTransform = CoordinateTransform(imageTransform, previewTransform)
+                                previewToImageTransform = CoordinateTransform(previewTransform, imageTransform)
+                                analysisSize = imageProxy.width to imageProxy.height
+                                analysisCropRect = imageProxy.cropRect
+                            }
+                        }
+                        val previewRoi = buildGuideRoi(previewView.width, previewView.height)
+                        val transform = previewToImageTransform
+                        if (transform != null && previewView.width > 0 && previewView.height > 0) {
+                            mapRectToImage(previewRoi, transform, imageProxy.width, imageProxy.height)
+                        } else {
+                            buildGuideRoi(imageProxy.width, imageProxy.height)
+                        }
+                    }
+                    val roi = mappedRoi.takeIf { it.width() > 8 && it.height() > 8 }
+                        ?: Rect(0, 0, imageProxy.width, imageProxy.height)
                     val luma = extractRoiLumaInto(imageProxy, roi, lumaScratch)
                     val blur = computeLaplacianVarianceFast(luma.luma, luma.width, luma.height)
                     val illumination = luma.mean
@@ -228,15 +266,8 @@ fun TrackAScreen(
                     val cadenceMs = viewModel.landmarkCadenceMs(blur, illumination, now)
                     if (now - lastLandmarkAtMs >= cadenceMs) {
                         val submitTs = maxOf(now, lastLandmarkAtMs + 1)
-                        val crop = viewModel.computeLandmarkCropRect(
-                            frameWidth = imageProxy.width,
-                            frameHeight = imageProxy.height,
-                            guideRoi = roi,
-                            timestampMillis = submitTs,
-                        )
-                        val cropRect = crop ?: Rect(0, 0, imageProxy.width, imageProxy.height)
-                        val targetMax = if (crop != null) 360 else 480
-                        val bitmap = yuvConverter.toBitmap(imageProxy, cropRect, targetMax)
+                        val cropRect = imageProxy.cropRect
+                        val bitmap = yuvConverter.toBitmap(imageProxy, cropRect, 480)
                         viewModel.onLandmarksFrame(
                             bitmap,
                             submitTs,
@@ -309,11 +340,18 @@ fun TrackAScreen(
         }
     }
 
-    LaunchedEffect(uiState.focusRequested, uiState.overlayLandmarks, cameraControlState.value) {
+    LaunchedEffect(uiState.focusRequested, uiState.overlayLandmarks, cameraControlState.value, imageToPreviewTransform, analysisSize, analysisCropRect) {
         if (!uiState.focusRequested) return@LaunchedEffect
         val control = cameraControlState.value ?: return@LaunchedEffect
         if (previewView.width == 0 || previewView.height == 0) return@LaunchedEffect
-        val normalized = computeFocusPoint(uiState.overlayLandmarks) ?: return@LaunchedEffect
+        val mapped = mapLandmarksToPreview(
+            landmarks = uiState.overlayLandmarks,
+            imageToPreview = imageToPreviewTransform,
+            analysisSize = analysisSize,
+            analysisCrop = analysisCropRect,
+            previewView = previewView,
+        )
+        val normalized = computeFocusPoint(mapped) ?: return@LaunchedEffect
         val factory = previewView.meteringPointFactory
         val point = factory.createPoint(
             normalized.x * previewView.width,
@@ -328,10 +366,11 @@ fun TrackAScreen(
         )
     }
 
-    LaunchedEffect(uiState.autoCaptureRequested, cameraCaptureState.value) {
-        if (!uiState.autoCaptureRequested) return@LaunchedEffect
+    LaunchedEffect(uiState.autoCaptureToken, cameraCaptureState.value) {
+        if (uiState.autoCaptureToken == 0L) return@LaunchedEffect
         val imageCapture = cameraCaptureState.value ?: return@LaunchedEffect
         if (captureBurstInFlight) return@LaunchedEffect
+        if (!viewModel.startAutoCapture()) return@LaunchedEffect
         captureBurstInFlight = true
         try {
             val best = captureBestOfN(
@@ -375,10 +414,17 @@ fun TrackAScreen(
             )
             val orientationAngle = uiState.detection?.orientationAngle
             val isHorizontal = orientationAngle?.let { kotlin.math.abs(it) in 45f..135f } ?: true
+            val mappedLandmarks = mapLandmarksToPreview(
+                landmarks = uiState.overlayLandmarks,
+                imageToPreview = imageToPreviewTransform,
+                analysisSize = analysisSize,
+                analysisCrop = analysisCropRect,
+                previewView = previewView,
+            )
             CameraOverlay(isReady = uiState.captureEnabled)
             FingerprintGuideOverlay(visible = !uiState.captureEnabled, horizontal = isHorizontal)
             if (BuildConfig.DEBUG && uiState.debugOverlayEnabled) {
-                LandmarkOverlay(landmarks = uiState.overlayLandmarks)
+                LandmarkOverlay(landmarks = mappedLandmarks)
             }
 
             Column(
@@ -404,9 +450,9 @@ fun TrackAScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Row(horizontalArrangement = Arrangement.Center) {
-                            StatusChip("Focus", focusScore, focusScore >= 80)
+                            StatusChip("Focus", focusScore, focusScore >= TrackACaptureConfig.focusEnterScore)
                             Spacer(modifier = Modifier.width(8.dp))
-                            StatusChip("Light", lightScore, lightScore >= 80)
+                            StatusChip("Light", lightScore, lightScore >= TrackACaptureConfig.lightEnterScore)
                             Spacer(modifier = Modifier.width(8.dp))
                             StatusChip("Center", centerScore, centerScore >= TrackACaptureConfig.centerEnterScore)
                         }
@@ -699,8 +745,8 @@ private fun StatusBanner(isReady: Boolean, message: String?) {
 private fun StabilityBar(score: Int) {
     val clamped = score.coerceIn(0, 100)
     val barColor = when {
-        clamped >= 80 -> Color(0xFF10B981)
-        clamped >= 55 -> Color(0xFFF59E0B)
+        clamped >= TrackACaptureConfig.steadyEnterScore -> Color(0xFF10B981)
+        clamped >= TrackACaptureConfig.steadyExitScore -> Color(0xFFF59E0B)
         else -> Color(0xFF6B7280)
     }
     Column(
@@ -745,6 +791,68 @@ private fun computeFocusPoint(landmarks: List<FingerLandmark>): Offset? {
     val avgX = points.map { it.x }.average().toFloat()
     val avgY = points.map { it.y }.average().toFloat()
     return Offset(avgX.coerceIn(0f, 1f), avgY.coerceIn(0f, 1f))
+}
+
+@OptIn(TransformExperimental::class)
+private fun mapLandmarksToPreview(
+    landmarks: List<FingerLandmark>,
+    imageToPreview: CoordinateTransform?,
+    analysisSize: Pair<Int, Int>?,
+    analysisCrop: Rect?,
+    previewView: PreviewView,
+): List<FingerLandmark> {
+    if (landmarks.isEmpty() || imageToPreview == null || analysisSize == null ||
+        previewView.width == 0 || previewView.height == 0
+    ) {
+        return landmarks
+    }
+    val (imageW, imageH) = analysisSize
+    val crop = analysisCrop ?: Rect(0, 0, imageW, imageH)
+    return landmarks.mapNotNull { lm ->
+        val point = PointF(
+            crop.left + lm.x * crop.width(),
+            crop.top + lm.y * crop.height(),
+        )
+        imageToPreview.mapPoint(point)
+        if (point.x.isNaN() || point.y.isNaN()) return@mapNotNull null
+        val nx = (point.x / previewView.width).coerceIn(0f, 1f)
+        val ny = (point.y / previewView.height).coerceIn(0f, 1f)
+        FingerLandmark(
+            x = nx,
+            y = ny,
+            z = lm.z,
+            type = lm.type,
+        )
+    }
+}
+
+@OptIn(TransformExperimental::class)
+private fun mapRectToImage(
+    previewRect: Rect,
+    previewToImage: CoordinateTransform,
+    imageWidth: Int,
+    imageHeight: Int,
+): Rect {
+    if (previewRect.width() <= 0 || previewRect.height() <= 0) {
+        return Rect(0, 0, imageWidth, imageHeight)
+    }
+    val points = arrayOf(
+        PointF(previewRect.left.toFloat(), previewRect.top.toFloat()),
+        PointF(previewRect.right.toFloat(), previewRect.top.toFloat()),
+        PointF(previewRect.right.toFloat(), previewRect.bottom.toFloat()),
+        PointF(previewRect.left.toFloat(), previewRect.bottom.toFloat()),
+    )
+    points.forEach { previewToImage.mapPoint(it) }
+    val minX = points.minOf { it.x }.coerceIn(0f, imageWidth.toFloat())
+    val maxX = points.maxOf { it.x }.coerceIn(0f, imageWidth.toFloat())
+    val minY = points.minOf { it.y }.coerceIn(0f, imageHeight.toFloat())
+    val maxY = points.maxOf { it.y }.coerceIn(0f, imageHeight.toFloat())
+    return Rect(
+        minX.toInt().coerceAtLeast(0),
+        minY.toInt().coerceAtLeast(0),
+        maxX.toInt().coerceAtMost(imageWidth),
+        maxY.toInt().coerceAtMost(imageHeight),
+    )
 }
 
 private data class LumaRoi(

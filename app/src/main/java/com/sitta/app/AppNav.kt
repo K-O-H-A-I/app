@@ -36,6 +36,7 @@ fun SittaApp(container: AppContainer) {
             TrackAScreen(
                 sessionRepository = container.sessionRepository,
                 authManager = container.authManager,
+                configRepo = container.configRepo,
                 settingsRepository = container.settingsRepository,
                 qualityAnalyzer = container.qualityAnalyzer,
                 livenessDetector = container.livenessDetector,

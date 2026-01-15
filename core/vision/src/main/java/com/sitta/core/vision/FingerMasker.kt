@@ -41,14 +41,7 @@ class FingerMasker {
         val mat = OpenCvUtils.bitmapToMat(bitmap)
         val bgr = Mat()
         Imgproc.cvtColor(mat, bgr, Imgproc.COLOR_RGBA2BGR)
-        val hsv = Mat()
-        Imgproc.cvtColor(bgr, hsv, Imgproc.COLOR_BGR2HSV)
-
-        val hsvMask = Mat()
-        Core.inRange(hsv, Scalar(0.0, 30.0, 60.0), Scalar(20.0, 170.0, 255.0), hsvMask)
-        val hsvKernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
-        Imgproc.morphologyEx(hsvMask, hsvMask, Imgproc.MORPH_CLOSE, hsvKernel, Point(-1.0, -1.0), 2)
-        Imgproc.morphologyEx(hsvMask, hsvMask, Imgproc.MORPH_OPEN, hsvKernel, Point(-1.0, -1.0), 1)
+        val hsvMask = buildHsvSkinMask(bgr)
 
         val gcMask = Mat.zeros(bgr.size(), CvType.CV_8UC1)
         val rect = Rect(
@@ -92,51 +85,42 @@ class FingerMasker {
         val mat = OpenCvUtils.bitmapToMat(bitmap)
         val bgr = Mat()
         Imgproc.cvtColor(mat, bgr, Imgproc.COLOR_RGBA2BGR)
-        val hsv = Mat()
-        Imgproc.cvtColor(bgr, hsv, Imgproc.COLOR_BGR2HSV)
-
-        val hsvMask = Mat()
-        Core.inRange(hsv, Scalar(0.0, 30.0, 60.0), Scalar(20.0, 170.0, 255.0), hsvMask)
-        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
-        Imgproc.morphologyEx(hsvMask, hsvMask, Imgproc.MORPH_CLOSE, kernel, Point(-1.0, -1.0), 2)
-        Imgproc.morphologyEx(hsvMask, hsvMask, Imgproc.MORPH_OPEN, kernel, Point(-1.0, -1.0), 1)
+        val hsvMask = buildHsvSkinMask(bgr)
 
         val hasLandmarks = detection?.landmarks?.isNotEmpty() == true
-        val mask = if (hasLandmarks) {
+        var mask = if (hasLandmarks) {
             val padMask = buildPadMask(
                 detection!!.landmarks,
                 bitmap.width,
                 bitmap.height,
             )
-            if (Core.countNonZero(padMask) == 0) {
-                null
-            } else {
-                val combined = Mat()
-                Core.bitwise_and(hsvMask, padMask, combined)
-                val hsvCoverage = Core.countNonZero(combined).toDouble() / (bitmap.width * bitmap.height).toDouble()
-                val refined = if (hsvCoverage > 0.85) {
-                    combined
-                } else {
-                    runGrabCutWithMask(bgr, hsvMask, padMask)
-                }
-                val cleaned = filterComponentsByPadOverlap(refined, padMask, minAreaPx)
-                cleaned
-            }
+            val grabMask = runGrabCutWithMask(bgr, hsvMask, padMask)
+            val padCombined = Mat()
+            Core.bitwise_and(grabMask, padMask, padCombined)
+            val filtered = filterComponentsByPadOverlap(padCombined, padMask, minAreaPx)
+            if (Core.countNonZero(filtered) > 0) filtered else padCombined
         } else {
             val grabMask = runGrabCut(bgr)
             val combined = Mat()
             Core.bitwise_and(hsvMask, grabMask, combined)
+            val baseMask = keepLargestComponent(combined) ?: return null
             val innerRect = Rect(
                 (bitmap.width * 0.2).toInt(),
                 (bitmap.height * 0.2).toInt(),
                 (bitmap.width * 0.6).toInt(),
                 (bitmap.height * 0.6).toInt(),
             )
-            val rectMask = Mat.zeros(combined.size(), combined.type())
+            val rectMask = Mat.zeros(baseMask.size(), baseMask.type())
             Imgproc.rectangle(rectMask, innerRect, Scalar(255.0), -1)
-            Core.bitwise_and(combined, rectMask, combined)
-            keepLargestComponent(combined)
-        } ?: return null
+            val inner = Mat()
+            Core.bitwise_and(baseMask, rectMask, inner)
+            inner
+        }
+
+        val cleanKernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(5.0, 5.0))
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, cleanKernel, Point(-1.0, -1.0), 1)
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, cleanKernel, Point(-1.0, -1.0), 1)
+        mask = removeSmallComponents(mask, minAreaPx)
 
         if (Core.countNonZero(mask) == 0) return null
         val masked = Mat(mat.size(), mat.type(), Scalar(0.0, 0.0, 0.0, 255.0))
@@ -146,6 +130,21 @@ class FingerMasker {
         val maskArea = Core.countNonZero(mask)
         val maskRatio = maskArea.toDouble() / (bitmap.width * bitmap.height).toDouble()
         return SegmentationResult(out, maskRatio, maskArea)
+    }
+
+    private fun buildHsvSkinMask(bgr: Mat): Mat {
+        val hsv = Mat()
+        Imgproc.cvtColor(bgr, hsv, Imgproc.COLOR_BGR2HSV)
+        val mask1 = Mat()
+        val mask2 = Mat()
+        Core.inRange(hsv, Scalar(0.0, 40.0, 60.0), Scalar(20.0, 150.0, 240.0), mask1)
+        Core.inRange(hsv, Scalar(160.0, 40.0, 60.0), Scalar(180.0, 150.0, 240.0), mask2)
+        val hsvMask = Mat()
+        Core.bitwise_or(mask1, mask2, hsvMask)
+        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
+        Imgproc.morphologyEx(hsvMask, hsvMask, Imgproc.MORPH_CLOSE, kernel, Point(-1.0, -1.0), 2)
+        Imgproc.morphologyEx(hsvMask, hsvMask, Imgproc.MORPH_OPEN, kernel, Point(-1.0, -1.0), 1)
+        return hsvMask
     }
 
     fun applyFingerTipMask(
@@ -325,14 +324,14 @@ class FingerMasker {
     private fun runGrabCut(bgr: Mat): Mat {
         val gcMask = Mat.zeros(bgr.size(), CvType.CV_8UC1)
         val rect = Rect(
-            (bgr.cols() * 0.05).toInt(),
-            (bgr.rows() * 0.05).toInt(),
-            (bgr.cols() * 0.9).toInt(),
-            (bgr.rows() * 0.9).toInt(),
+            (bgr.cols() * 0.2).toInt(),
+            (bgr.rows() * 0.2).toInt(),
+            (bgr.cols() * 0.6).toInt(),
+            (bgr.rows() * 0.6).toInt(),
         )
         val bgd = Mat.zeros(1, 65, CvType.CV_64F)
         val fgd = Mat.zeros(1, 65, CvType.CV_64F)
-        Imgproc.grabCut(bgr, gcMask, rect, bgd, fgd, 5, Imgproc.GC_INIT_WITH_RECT)
+        Imgproc.grabCut(bgr, gcMask, rect, bgd, fgd, 3, Imgproc.GC_INIT_WITH_RECT)
         val fg = Mat()
         val prFg = Mat()
         Core.compare(gcMask, Scalar(Imgproc.GC_FGD.toDouble()), fg, Core.CMP_EQ)
@@ -374,7 +373,7 @@ class FingerMasker {
             }
             val padLength = length * 0.7
             val widthRef = estimateFingerWidth(landmarks, tipType, length)
-            val padWidth = (widthRef * 0.8).coerceAtLeast(length * 0.45)
+            val padWidth = (widthRef * 0.7).coerceAtLeast(length * 0.4)
             val center = Point(
                 tipPoint.x + dx * 0.3,
                 tipPoint.y + dy * 0.3,
@@ -424,8 +423,8 @@ class FingerMasker {
             }
             else -> null
         }
-        val base = (width ?: (fallbackLength * 0.6)).toDouble()
-        val scale = maxOf(widthScale(landmarks), 1.0)
+        val base: Double = width?.toDouble() ?: (fallbackLength * 0.6)
+        val scale: Double = maxOf(widthScale(landmarks), 1.0)
         return base * scale
     }
 
@@ -440,11 +439,11 @@ class FingerMasker {
     fun cropToFingertips(
         bitmap: Bitmap,
         fallback: Bitmap,
-        padFraction: Float = 0.18f,
-        targetMaxSide: Int = 360,
+        padFraction: Float = 0.22f,
+        targetMaxSide: Int = 480,
         minCoverage: Float = 0.08f,
         minSideFraction: Float = 0.22f,
-        maxScale: Float = 1.6f,
+        maxScale: Float = 1.2f,
     ): Bitmap {
         val width = bitmap.width
         val height = bitmap.height

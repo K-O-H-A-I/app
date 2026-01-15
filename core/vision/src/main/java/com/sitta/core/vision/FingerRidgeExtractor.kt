@@ -8,7 +8,7 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 
 class FingerRidgeExtractor {
-    private val gaborKernels: List<Mat> = buildGaborKernels()
+    private val gaborKernels: List<Mat> by lazy { buildGaborKernels() }
 
     fun extractRidge(bitmap: Bitmap): Bitmap {
         val src = OpenCvUtils.bitmapToMat(bitmap)
@@ -36,8 +36,8 @@ class FingerRidgeExtractor {
             255.0,
             Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
             Imgproc.THRESH_BINARY,
-            31,
-            -2.0,
+            15,
+            -3.0,
         )
         Core.bitwise_and(ridge, ridge, ridge, mask)
         val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(3.0, 3.0))
@@ -67,7 +67,7 @@ class FingerRidgeExtractor {
         val kernels = mutableListOf<Mat>()
         val ksize = 21
         val sigma = 3.0
-        val lambda = 8.0
+        val lambda = 10.0
         val gamma = 0.5
         val psi = 0.0
         val orientations = 8

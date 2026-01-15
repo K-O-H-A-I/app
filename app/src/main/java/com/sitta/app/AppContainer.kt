@@ -2,7 +2,6 @@ package com.sitta.app
 
 import android.content.Context
 import com.google.gson.Gson
-import com.sitta.core.common.DefaultConfig
 import com.sitta.core.data.AuthManager
 import com.sitta.core.data.ConfigRepo
 import com.sitta.core.data.SessionRepository
@@ -25,10 +24,17 @@ class AppContainer(context: Context) {
     val authManager = AuthManager()
     val settingsRepository = SettingsRepository()
 
-    val qualityAnalyzer = OpenCvQualityAnalyzer(DefaultConfig.value)
+    init {
+        kotlinx.coroutines.runBlocking {
+            configRepo.load()
+        }
+    }
+
+    private val config = configRepo.current()
+    val qualityAnalyzer = OpenCvQualityAnalyzer(config)
     val enhancementPipeline = OpenCvEnhancementPipeline()
     val matcher = SourceAfisMatcher()
-    val livenessDetector = MotionLivenessDetector(DefaultConfig.value)
+    val livenessDetector = MotionLivenessDetector(config)
     val fingerDetector = FingerDetector(context)
     val fingerSceneAnalyzer = FingerSceneAnalyzer()
     val fingerMasker = FingerMasker()

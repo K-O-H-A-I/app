@@ -17,7 +17,7 @@ class OpenCvEnhancementPipeline : EnhancementPipeline {
     override suspend fun enhance(bitmap: Bitmap, sharpenStrength: Float): EnhancementResult {
         return withContext(Dispatchers.Default) {
             val steps = mutableListOf<EnhancementStep>()
-            val input = downscale(bitmap, 420)
+            val input = downscale(bitmap, 640)
             val srcMat = Mat()
             Utils.bitmapToMat(input, srcMat)
 
@@ -34,11 +34,6 @@ class OpenCvEnhancementPipeline : EnhancementPipeline {
             steps.add(EnhancementStep("Contrast Boost", elapsedMs(t1)))
 
             val t2 = System.nanoTime()
-            val denoised = Mat()
-            Imgproc.bilateralFilter(claheMat, denoised, 7, 60.0, 60.0)
-            steps.add(EnhancementStep("Noise Reduction", elapsedMs(t2)))
-
-            val t3 = System.nanoTime()
             val sharpened = Mat()
             val strength = sharpenStrength.coerceIn(0f, 2f)
             val kernel = Mat(3, 3, CvType.CV_32F)
@@ -49,8 +44,8 @@ class OpenCvEnhancementPipeline : EnhancementPipeline {
                 0f, -strength, 0f,
             )
             kernel.put(0, 0, kernelData)
-            Imgproc.filter2D(denoised, sharpened, -1, kernel)
-            steps.add(EnhancementStep("Detail Sharpen", elapsedMs(t3)))
+            Imgproc.filter2D(claheMat, sharpened, -1, kernel)
+            steps.add(EnhancementStep("Detail Sharpen", elapsedMs(t2)))
 
             val outBitmap = Bitmap.createBitmap(sharpened.cols(), sharpened.rows(), Bitmap.Config.ARGB_8888)
             Utils.matToBitmap(sharpened, outBitmap)
