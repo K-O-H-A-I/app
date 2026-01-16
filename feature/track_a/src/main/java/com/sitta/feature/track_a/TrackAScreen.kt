@@ -171,6 +171,7 @@ fun TrackAScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewOutputTransformRef = remember { AtomicReference<OutputTransform?>(null) }
+    val lastPreviewTransformRef = remember { AtomicReference<OutputTransform?>(null) }
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
     DisposableEffect(previewView) {
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -234,26 +235,22 @@ fun TrackAScreen(
                 try {
                     val now = System.currentTimeMillis()
                     @OptIn(TransformExperimental::class)
-                    val mappedRoi = run {
+                    run {
                         val previewTransform = previewOutputTransformRef.get()
                         if (previewTransform != null && previewView.width > 0 && previewView.height > 0) {
                             val imageTransform = transformFactory.getOutputTransform(imageProxy)
+                            val previewChanged = lastPreviewTransformRef.get() !== previewTransform
                             if (analysisSize == null ||
                                 analysisSize?.first != imageProxy.width ||
-                                analysisSize?.second != imageProxy.height
+                                analysisSize?.second != imageProxy.height ||
+                                previewChanged
                             ) {
                                 imageToPreviewTransform = CoordinateTransform(imageTransform, previewTransform)
                                 previewToImageTransform = CoordinateTransform(previewTransform, imageTransform)
                                 analysisSize = imageProxy.width to imageProxy.height
+                                lastPreviewTransformRef.set(previewTransform)
                             }
                             analysisCropRect = imageProxy.cropRect
-                        }
-                        val previewRoi = buildGuideRoi(previewView.width, previewView.height)
-                        val transform = previewToImageTransform
-                        if (transform != null && previewView.width > 0 && previewView.height > 0) {
-                            mapRectToImage(previewRoi, transform, imageProxy.width, imageProxy.height)
-                        } else {
-                            buildGuideRoi(imageProxy.width, imageProxy.height)
                         }
                     }
                     val cropRect = if (imageProxy.cropRect.width() > 0 && imageProxy.cropRect.height() > 0) {
@@ -261,11 +258,13 @@ fun TrackAScreen(
                     } else {
                         Rect(0, 0, imageProxy.width, imageProxy.height)
                     }
-                    val metricsRoi = if (mappedRoi.width() > 0 && mappedRoi.height() > 0) {
-                        mappedRoi
-                    } else {
-                        cropRect
-                    }
+                    val guideInCrop = buildGuideRoi(cropRect.width(), cropRect.height())
+                    val metricsRoi = Rect(
+                        (guideInCrop.left + cropRect.left).coerceAtLeast(0),
+                        (guideInCrop.top + cropRect.top).coerceAtLeast(0),
+                        (guideInCrop.right + cropRect.left).coerceAtMost(imageProxy.width),
+                        (guideInCrop.bottom + cropRect.top).coerceAtMost(imageProxy.height),
+                    )
                     val roi = metricsRoi
                     val lumaPrimary = extractRoiLumaInto(imageProxy, roi, lumaScratch)
                     val blurPrimary = computeLaplacianVarianceFast(lumaPrimary.luma, lumaPrimary.width, lumaPrimary.height)
@@ -410,8 +409,8 @@ fun TrackAScreen(
         )
     }
 
-    LaunchedEffect(uiState.autoCaptureToken, cameraCaptureState.value) {
-        if (uiState.autoCaptureToken == 0L) return@LaunchedEffect
+    LaunchedEffect(uiState.autoCaptureRequested, uiState.autoCaptureToken, cameraCaptureState.value) {
+        if (!uiState.autoCaptureRequested && uiState.autoCaptureToken == 0L) return@LaunchedEffect
         val imageCapture = cameraCaptureState.value ?: return@LaunchedEffect
         if (captureBurstInFlight) return@LaunchedEffect
         if (!viewModel.startAutoCapture()) return@LaunchedEffect
@@ -709,9 +708,9 @@ private fun FingerprintGuideOverlay(visible: Boolean, horizontal: Boolean) {
 
 @Composable
 private fun QualityStateRow(focusScore: Int, lightScore: Int, steadyScore: Int) {
-    val focusState = scoreToState(focusScore)
-    val lightState = scoreToState(lightScore)
-    val steadyState = scoreToState(steadyScore)
+    val focusState = scoreToState(focusScore, TrackACaptureConfig.focusEnterScore)
+    val lightState = scoreToState(lightScore, TrackACaptureConfig.lightEnterScore)
+    val steadyState = scoreToState(steadyScore, TrackACaptureConfig.steadyEnterScore)
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.Center) {
             StatePill(focusState)
@@ -733,9 +732,9 @@ private fun QualityStateRow(focusScore: Int, lightScore: Int, steadyScore: Int) 
 
 private enum class QualityState { GOOD, ADJUST, CHECK }
 
-private fun scoreToState(score: Int): QualityState {
+private fun scoreToState(score: Int, goodThreshold: Int): QualityState {
     return when {
-        score >= 80 -> QualityState.GOOD
+        score >= goodThreshold -> QualityState.GOOD
         score >= 55 -> QualityState.ADJUST
         else -> QualityState.CHECK
     }

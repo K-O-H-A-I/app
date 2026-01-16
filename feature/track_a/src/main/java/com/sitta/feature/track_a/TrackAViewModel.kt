@@ -770,7 +770,12 @@ class TrackAViewModel(
         }
         val detectionStable = detectionGate.update(detectionPass, frame.timestamp)
 
-        val centerScore = if (fingertipMode && centerScoreRaw == 0) 100 else centerScoreRaw
+        val centerScore = when {
+            centerScoreRaw > 0 -> centerScoreRaw
+            detection.isDetected && coverage >= TrackACaptureConfig.coverageSoftMin -> 100
+            fingertipMode -> 100
+            else -> 0
+        }
         val centerValid = if (fingertipMode) true else centerScore > 0
         val steadyScore = if (fingertipMode && steadyScoreRaw < steadyThreshold) {
             steadyThreshold
@@ -1022,21 +1027,22 @@ class TrackAViewModel(
         width: Int,
         height: Int,
     ): Double {
-        val tips = detection.landmarks.filter {
+        val points = detection.landmarks.filter {
             it.type in listOf(
-                LandmarkType.INDEX_TIP,
-                LandmarkType.MIDDLE_TIP,
-                LandmarkType.RING_TIP,
-                LandmarkType.PINKY_TIP,
+                LandmarkType.INDEX_TIP, LandmarkType.INDEX_DIP, LandmarkType.INDEX_PIP,
+                LandmarkType.MIDDLE_TIP, LandmarkType.MIDDLE_DIP, LandmarkType.MIDDLE_PIP,
+                LandmarkType.RING_TIP, LandmarkType.RING_DIP, LandmarkType.RING_PIP,
+                LandmarkType.PINKY_TIP, LandmarkType.PINKY_DIP, LandmarkType.PINKY_PIP,
+                LandmarkType.THUMB_TIP, LandmarkType.THUMB_IP, LandmarkType.THUMB_MCP,
             )
         }
-        if (tips.isNotEmpty()) {
-            val inside = tips.count { tip ->
-                val x = tip.x * width
-                val y = tip.y * height
+        if (points.isNotEmpty()) {
+            val inside = points.count { lm ->
+                val x = lm.x * width
+                val y = lm.y * height
                 x >= roi.left && x <= roi.right && y >= roi.top && y <= roi.bottom
             }
-            return inside.toDouble() / tips.size.toDouble()
+            return inside.toDouble() / points.size.toDouble()
         }
         val bbox = detection.boundingBox ?: return 0.0
         val roiLeft = roi.left.toFloat() / width
@@ -1072,17 +1078,25 @@ class TrackAViewModel(
         width: Int,
         height: Int,
     ): Pair<Float, Float>? {
-        val tipPoints = detection.landmarks.filter {
+        val pointSet = detection.landmarks.filter {
             it.type in listOf(
                 com.sitta.core.vision.LandmarkType.INDEX_TIP,
+                com.sitta.core.vision.LandmarkType.INDEX_DIP,
+                com.sitta.core.vision.LandmarkType.INDEX_PIP,
                 com.sitta.core.vision.LandmarkType.MIDDLE_TIP,
+                com.sitta.core.vision.LandmarkType.MIDDLE_DIP,
+                com.sitta.core.vision.LandmarkType.MIDDLE_PIP,
                 com.sitta.core.vision.LandmarkType.RING_TIP,
+                com.sitta.core.vision.LandmarkType.RING_DIP,
+                com.sitta.core.vision.LandmarkType.RING_PIP,
                 com.sitta.core.vision.LandmarkType.PINKY_TIP,
+                com.sitta.core.vision.LandmarkType.PINKY_DIP,
+                com.sitta.core.vision.LandmarkType.PINKY_PIP,
             )
         }
-        val rawCenter = if (tipPoints.isNotEmpty()) {
-            val avgX = tipPoints.map { it.x }.average().toFloat() * width
-            val avgY = tipPoints.map { it.y }.average().toFloat() * height
+        val rawCenter = if (pointSet.isNotEmpty()) {
+            val avgX = pointSet.map { it.x }.average().toFloat() * width
+            val avgY = pointSet.map { it.y }.average().toFloat() * height
             Pair(avgX, avgY)
         } else {
             val boundingBox = detection.boundingBox ?: return null
@@ -1096,15 +1110,15 @@ class TrackAViewModel(
             lastSmoothedCenter = rawCenter
             return rawCenter
         }
-        val deadband = roi.width().toFloat() * 0.003f
+        val deadband = roi.width().toFloat() * 0.01f
         val dx = rawCenter.first - prev.first
         val dy = rawCenter.second - prev.second
         if (kotlin.math.sqrt(dx * dx + dy * dy) < deadband) {
             return prev
         }
         val smoothed = Pair(
-            (prev.first * 0.75f) + (rawCenter.first * 0.25f),
-            (prev.second * 0.75f) + (rawCenter.second * 0.25f),
+            (prev.first * 0.85f) + (rawCenter.first * 0.15f),
+            (prev.second * 0.85f) + (rawCenter.second * 0.15f),
         )
         lastSmoothedCenter = smoothed
         return smoothed
