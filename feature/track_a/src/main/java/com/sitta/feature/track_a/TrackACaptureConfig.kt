@@ -31,6 +31,11 @@ object TrackACaptureConfig {
     const val torchDebounceMs = 900L
     const val torchMinOnMs = 3500L
     const val autoCaptureCooldownMs = 2000L
+    const val autoCaptureScaleMin = 0.50f
+    const val autoCaptureFocusMin = 80
+    const val autoCaptureSteadyMin = 80
+    const val autoCaptureEdgeDensityMin = 0.24
+    const val autoCaptureTextureVarianceMin = 0.14
     const val focusHoldMs = 180L
     const val focusRefreshMs = 2000L
     const val focusMaxWaitMs = 220L

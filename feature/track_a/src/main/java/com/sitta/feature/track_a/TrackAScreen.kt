@@ -228,7 +228,7 @@ fun TrackAScreen(
                 .build()
             val capture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setJpegQuality(95)
+                .setJpegQuality(100)
                 .setTargetRotation(previewView.display.rotation)
                 .build()
             analysis.setAnalyzer(analysisExecutor) { imageProxy ->
@@ -258,14 +258,21 @@ fun TrackAScreen(
                     } else {
                         Rect(0, 0, imageProxy.width, imageProxy.height)
                     }
-                    val guideInCrop = buildGuideRoi(cropRect.width(), cropRect.height())
-                    val metricsRoi = Rect(
-                        (guideInCrop.left + cropRect.left).coerceAtLeast(0),
-                        (guideInCrop.top + cropRect.top).coerceAtLeast(0),
-                        (guideInCrop.right + cropRect.left).coerceAtMost(imageProxy.width),
-                        (guideInCrop.bottom + cropRect.top).coerceAtMost(imageProxy.height),
-                    )
-                    val roi = metricsRoi
+                    val roi = run {
+                        val previewTransform = previewToImageTransform
+                        if (previewTransform != null && previewView.width > 0 && previewView.height > 0) {
+                            val guidePreview = buildGuideRoi(previewView.width, previewView.height)
+                            mapRectToImage(guidePreview, previewTransform, imageProxy.width, imageProxy.height)
+                        } else {
+                            val guideInCrop = buildGuideRoi(cropRect.width(), cropRect.height())
+                            Rect(
+                                (guideInCrop.left + cropRect.left).coerceAtLeast(0),
+                                (guideInCrop.top + cropRect.top).coerceAtLeast(0),
+                                (guideInCrop.right + cropRect.left).coerceAtMost(imageProxy.width),
+                                (guideInCrop.bottom + cropRect.top).coerceAtMost(imageProxy.height),
+                            )
+                        }
+                    }
                     val lumaPrimary = extractRoiLumaInto(imageProxy, roi, lumaScratch)
                     val blurPrimary = computeLaplacianVarianceFast(lumaPrimary.luma, lumaPrimary.width, lumaPrimary.height)
                     val illuminationPrimary = lumaPrimary.mean
@@ -416,19 +423,31 @@ fun TrackAScreen(
         if (!viewModel.startAutoCapture()) return@LaunchedEffect
         captureBurstInFlight = true
         try {
-            val best = captureBestOfN(
+            var best = captureBestOfN(
                 imageCapture = imageCapture,
                 captureExecutor = captureExecutor,
                 converter = yuvConverter,
-                n = 3,
+                n = 1,
                 scoreFn = { bitmap ->
                     withContext(Dispatchers.Default) { viewModel.scoreCandidate(bitmap) }
                 },
             )
+            if (best == null) {
+                kotlinx.coroutines.delay(250L)
+                best = captureBestOfN(
+                    imageCapture = imageCapture,
+                    captureExecutor = captureExecutor,
+                    converter = yuvConverter,
+                    n = 1,
+                    scoreFn = { bitmap ->
+                        withContext(Dispatchers.Default) { viewModel.scoreCandidate(bitmap) }
+                    },
+                )
+            }
             if (best != null) {
                 viewModel.captureFromBitmap(best, CaptureSource.AUTO)
             } else {
-                viewModel.onAutoCaptureFailure()
+                viewModel.capture()
             }
         } catch (t: Throwable) {
             Log.e("TrackA", "Auto capture failed", t)

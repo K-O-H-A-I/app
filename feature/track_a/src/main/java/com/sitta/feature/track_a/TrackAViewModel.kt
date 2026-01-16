@@ -57,6 +57,7 @@ class TrackAViewModel(
 
     private var latestFrame: Bitmap? = null
     private var latestRoi: Rect? = null
+    private var lastRoiNorm: RectF? = null
     private var latestDetection: FingerDetectionResult? = null
     private var lastBlurScore: Double = 0.0
     private var lastIlluminationMean: Double = 0.0
@@ -143,6 +144,16 @@ class TrackAViewModel(
         timestampMillis: Long,
     ) {
         latestRoi = roi
+        lastRoiNorm = if (frameWidth > 0 && frameHeight > 0 && roi.width() > 0 && roi.height() > 0) {
+            RectF(
+                roi.left.toFloat() / frameWidth.toFloat(),
+                roi.top.toFloat() / frameHeight.toFloat(),
+                roi.right.toFloat() / frameWidth.toFloat(),
+                roi.bottom.toFloat() / frameHeight.toFloat(),
+            )
+        } else {
+            null
+        }
         lastBlurScore = blurScore
         lastIlluminationMean = illuminationMean
         perfTracker.onLumaFrame(blurScore, illuminationMean, lastStabilityVariance)
@@ -312,7 +323,14 @@ class TrackAViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val roi = buildGuideRoi(bitmap.width, bitmap.height)
+                val roi = lastRoiNorm?.let { norm ->
+                    Rect(
+                        (norm.left * bitmap.width).toInt().coerceIn(0, bitmap.width - 1),
+                        (norm.top * bitmap.height).toInt().coerceIn(0, bitmap.height - 1),
+                        (norm.right * bitmap.width).toInt().coerceIn(1, bitmap.width),
+                        (norm.bottom * bitmap.height).toInt().coerceIn(1, bitmap.height),
+                    )
+                } ?: buildGuideRoi(bitmap.width, bitmap.height)
                 val now = System.currentTimeMillis()
                 val detection = latestDetection?.takeIf { now - lastDetectionMillis <= 700L }
                     ?: fingerDetector.detectFinger(bitmap)
@@ -331,6 +349,8 @@ class TrackAViewModel(
                     is AppResult.Error -> return@launch
                 }
 
+                val fullRawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, bitmap)
+                if (fullRawResult is AppResult.Error) return@launch
                 val roiBitmap = Bitmap.createBitmap(
                     bitmap,
                     effectiveRoi.left,
@@ -338,8 +358,6 @@ class TrackAViewModel(
                     effectiveRoi.width(),
                     effectiveRoi.height(),
                 )
-                val rawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, roiBitmap)
-                if (rawResult is AppResult.Error) return@launch
                 val stillDetectionFull = fingerDetector.detectFingerStill(bitmap)
                 val stillDetection = mapDetectionToRoi(stillDetectionFull, effectiveRoi, bitmap.width, bitmap.height)
                 val segmentation = fingerMasker.segmentFingertips(roiBitmap, stillDetection)
@@ -415,6 +433,8 @@ class TrackAViewModel(
                     is AppResult.Success -> created.value
                     is AppResult.Error -> return@launch
                 }
+                val fullRawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, frame)
+                if (fullRawResult is AppResult.Error) return@launch
                 val roiBitmap = Bitmap.createBitmap(
                     frame,
                     roi.left,
@@ -422,8 +442,6 @@ class TrackAViewModel(
                     roi.width(),
                     roi.height(),
                 )
-                val rawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, roiBitmap)
-                if (rawResult is AppResult.Error) return@launch
                 val stillDetectionFull = fingerDetector.detectFingerStill(frame)
                 val stillDetection = mapDetectionToRoi(stillDetectionFull, roi, frame.width, frame.height)
                 val segmentation = fingerMasker.segmentFingertips(roiBitmap, stillDetection)
@@ -895,7 +913,18 @@ class TrackAViewModel(
             },
         )
 
-        val allowAutoCapture = autoCaptureEnabled || TrackACaptureConfig.forceAutoCapture
+        val autoCaptureCloseEnough = if (fingertipMode) {
+            frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
+                frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin
+        } else {
+            scaleRatio >= TrackACaptureConfig.autoCaptureScaleMin
+        }
+        val autoCaptureQuality = focusScore >= TrackACaptureConfig.autoCaptureFocusMin &&
+            steadyScore >= TrackACaptureConfig.autoCaptureSteadyMin &&
+            lightScore >= lightThreshold
+        val autoCaptureEligible = autoCaptureCloseEnough && autoCaptureQuality
+
+        val allowAutoCapture = (autoCaptureEnabled || TrackACaptureConfig.forceAutoCapture) && autoCaptureEligible
         if (allowAutoCapture &&
             readyState &&
             !captureInFlight &&
