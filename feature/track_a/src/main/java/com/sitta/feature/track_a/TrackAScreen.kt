@@ -261,15 +261,20 @@ fun TrackAScreen(
                     } else {
                         Rect(0, 0, imageProxy.width, imageProxy.height)
                     }
-                    val roi = centerCropRect(cropRect, 0.6f)
+                    val metricsRoi = if (mappedRoi.width() > 0 && mappedRoi.height() > 0) {
+                        mappedRoi
+                    } else {
+                        cropRect
+                    }
+                    val roi = metricsRoi
                     val lumaPrimary = extractRoiLumaInto(imageProxy, roi, lumaScratch)
                     val blurPrimary = computeLaplacianVarianceFast(lumaPrimary.luma, lumaPrimary.width, lumaPrimary.height)
                     val illuminationPrimary = lumaPrimary.mean
                     val useFallback = (lumaPrimary.width == 0 || lumaPrimary.height == 0) ||
                         (illuminationPrimary == 0.0 && blurPrimary == 0.0)
-                    val metricsRoi = if (useFallback) cropRect else roi
+                    val fallbackRoi = if (useFallback) cropRect else roi
                     val luma = if (useFallback) {
-                        extractRoiLumaInto(imageProxy, metricsRoi, lumaScratch)
+                        extractRoiLumaInto(imageProxy, fallbackRoi, lumaScratch)
                     } else {
                         lumaPrimary
                     }
@@ -285,7 +290,7 @@ fun TrackAScreen(
                         illumination = fallbackMetrics.mean
                         blur = fallbackMetrics.blur
                     }
-                    val innerRoi = insetRect(metricsRoi, 0.15f)
+                    val innerRoi = insetRect(fallbackRoi, 0.15f)
                     val textureLuma = if (innerRoi.width() > 0 && innerRoi.height() > 0) {
                         extractRoiLumaInto(imageProxy, innerRoi, lumaScratch)
                     } else {
@@ -298,7 +303,7 @@ fun TrackAScreen(
                         illuminationMean = illumination,
                         edgeDensity = edgeDensity,
                         textureVariance = textureVariance,
-                        roi = metricsRoi,
+                        roi = fallbackRoi,
                         frameWidth = imageProxy.width,
                         frameHeight = imageProxy.height,
                         timestampMillis = now,
