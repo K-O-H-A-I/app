@@ -702,7 +702,19 @@ class TrackAViewModel(
         if (frame.timestamp <= lastEvaluatedFrameMs) return
         lastEvaluatedFrameMs = frame.timestamp
 
-        val detection = frame.detection ?: FingerDetectionResult.notDetected()
+        val rawDetection = frame.detection
+            ?: latestDetection?.takeIf { frame.timestamp - lastDetectionMillis <= TrackACaptureConfig.landmarkStaleMs }
+            ?: FingerDetectionResult.notDetected()
+        val landmarkAge = if (lastLandmarkMillis == 0L) Long.MAX_VALUE else frame.timestamp - lastLandmarkMillis
+        val hasRecentLandmarks = lastLandmarks.isNotEmpty() && landmarkAge <= TrackACaptureConfig.landmarkStaleMs
+        val detection = when {
+            rawDetection.isDetected -> rawDetection
+            hasRecentLandmarks -> rawDetection.copy(
+                isDetected = true,
+                landmarks = lastLandmarks,
+            )
+            else -> rawDetection
+        }
         val coverage = computeCoverageRatio(detection, frame.roi, frame.frameWidth, frame.frameHeight)
         lastCoverageRatio = coverage
         val centerPoint = computeDetectionCenter(detection, frame.roi, frame.frameWidth, frame.frameHeight)
@@ -726,8 +738,9 @@ class TrackAViewModel(
         )
 
         val presenceCoverage = coverage >= TrackACaptureConfig.coverageEnter
-        val detectionFresh = frame.timestamp - lastDetectionMillis <= TrackACaptureConfig.landmarkStaleMs
-        val landmarkStaleDuration = if (lastLandmarkMillis == 0L) Long.MAX_VALUE else frame.timestamp - lastLandmarkMillis
+        val detectionFresh = hasRecentLandmarks ||
+            (rawDetection.isDetected && frame.timestamp - lastDetectionMillis <= TrackACaptureConfig.landmarkStaleMs)
+        val landmarkStaleDuration = landmarkAge
         val focusScore = scoreFocus(frame.blurScore)
         val lightScore = scoreLight(frame.illuminationMean)
         val steadyScoreRaw = scoreSteady(stabilityVariance)
@@ -744,11 +757,16 @@ class TrackAViewModel(
             detection.boundingBox == null
 
         val centerScoreRaw = computeCenterScore(detection, frame.roi, frame.frameWidth, frame.frameHeight)
+        val centerScore = when {
+            centerScoreRaw > 0 -> centerScoreRaw
+            detection.isDetected && coverage >= TrackACaptureConfig.coverageSoftMin -> 100
+            else -> centerScoreRaw
+        }
         val fingerScalePx = computeFingerScalePx(detection, frame.frameWidth, frame.frameHeight)
         val scaleRatio = if (frame.roi.width() > 0) fingerScalePx / frame.roi.width().toFloat() else 0f
         val geometryPoor = detection.isDetected && (
             coverage < TrackACaptureConfig.coverageExit ||
-                centerScoreRaw == 0 ||
+                centerScore == 0 ||
                 scaleRatio > TrackACaptureConfig.scaleMax
             )
         val missingGeometry = !detection.isDetected || weakDetection || geometryPoor
@@ -770,20 +788,19 @@ class TrackAViewModel(
         }
         val detectionStable = detectionGate.update(detectionPass, frame.timestamp)
 
-        val centerScore = when {
-            centerScoreRaw > 0 -> centerScoreRaw
-            detection.isDetected && coverage >= TrackACaptureConfig.coverageSoftMin -> 100
+        val centerScoreFinal = when {
+            centerScore > 0 -> centerScore
             fingertipMode -> 100
             else -> 0
         }
-        val centerValid = if (fingertipMode) true else centerScore > 0
+        val centerValid = if (fingertipMode) true else centerScoreFinal > 0
         val steadyScore = if (fingertipMode && steadyScoreRaw < steadyThreshold) {
             steadyThreshold
         } else {
             steadyScoreRaw
         }
         val scaleScore = computeScaleScore(scaleRatio)
-        val centerScoreNorm = (centerScore / 100.0).coerceIn(0.0, 1.0)
+        val centerScoreNorm = (centerScoreFinal / 100.0).coerceIn(0.0, 1.0)
         val coverageScore = ((coverage - TrackACaptureConfig.coverageSoftMin) / TrackACaptureConfig.coverageSoftRange)
             .coerceIn(0.0, 1.0)
         val softScore = (centerScoreNorm * 0.50) + (scaleScore * 0.40) + (coverageScore * 0.10)
@@ -850,7 +867,7 @@ class TrackAViewModel(
             captureEnabled = combinedPass,
             livenessResult = lastLivenessResult,
             detection = detection,
-            centerScore = centerScore,
+            centerScore = centerScoreFinal,
             overlayLandmarks = overlayLandmarksFor(frame.timestamp),
             debugOverlayEnabled = debugOverlayEnabled,
             focusScore = focusScore,
@@ -869,7 +886,7 @@ class TrackAViewModel(
                 scaleRatio > TrackACaptureConfig.scaleMax -> "Move back slightly"
                 scaleRatio < TrackACaptureConfig.scaleMin -> "Move closer to the camera"
                 detection.isDetected && coverage < TrackACaptureConfig.coverageEnter -> "Move fingers into the box"
-                !centerValid || centerScore < centerThreshold -> "Center fingers in guide"
+                !centerValid || centerScoreFinal < centerThreshold -> "Center fingers in guide"
                 focusScore < focusThreshold -> "Hold steady for focus"
                 lightScore < lightThreshold -> "Add more light or flash"
                 steadyScore < steadyThreshold -> "Hold still"
@@ -1099,11 +1116,17 @@ class TrackAViewModel(
             val avgY = pointSet.map { it.y }.average().toFloat() * height
             Pair(avgX, avgY)
         } else {
-            val boundingBox = detection.boundingBox ?: return null
-            Pair(
-                (boundingBox.left + boundingBox.right) / 2f * width,
-                (boundingBox.top + boundingBox.bottom) / 2f * height,
-            )
+            val boundingBox = detection.boundingBox
+            if (boundingBox != null) {
+                Pair(
+                    (boundingBox.left + boundingBox.right) / 2f * width,
+                    (boundingBox.top + boundingBox.bottom) / 2f * height,
+                )
+            } else if (detection.isDetected && roi.width() > 0 && roi.height() > 0) {
+                Pair(roi.exactCenterX(), roi.exactCenterY())
+            } else {
+                return null
+            }
         }
         val prev = lastSmoothedCenter
         if (prev == null) {

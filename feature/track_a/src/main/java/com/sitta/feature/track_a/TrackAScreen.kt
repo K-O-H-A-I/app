@@ -172,7 +172,7 @@ fun TrackAScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewOutputTransformRef = remember { AtomicReference<OutputTransform?>(null) }
     val lastPreviewTransformRef = remember { AtomicReference<OutputTransform?>(null) }
-    val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
+    val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER } }
     DisposableEffect(previewView) {
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             @OptIn(TransformExperimental::class)
@@ -1153,20 +1153,26 @@ private suspend fun captureBestOfN(
     var bestScore = Double.NEGATIVE_INFINITY
     var bestJpeg: ByteArray? = null
     var bestBitmap: android.graphics.Bitmap? = null
+    var lastJpeg: ByteArray? = null
+    var lastBitmap: android.graphics.Bitmap? = null
     repeat(n) {
         val image = imageCapture.takePictureSuspend(captureExecutor)
         try {
             if (image.format == ImageFormat.JPEG) {
                 val bytes = image.jpegBytes()
-                val sample = decodeSampledBitmap(bytes, 320)
-                val score = scoreFn(sample)
-                if (score > bestScore) {
-                    bestScore = score
-                    bestJpeg = bytes
-                    bestBitmap = null
+                lastJpeg = bytes
+                val sample = runCatching { decodeSampledBitmap(bytes, 320) }.getOrNull()
+                if (sample != null) {
+                    val score = scoreFn(sample)
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestJpeg = bytes
+                        bestBitmap = null
+                    }
                 }
             } else {
                 val bmp = converter.toBitmap(image, Rect(0, 0, image.width, image.height), 480)
+                lastBitmap = bmp
                 val score = scoreFn(bmp)
                 if (score > bestScore) {
                     bestScore = score
@@ -1182,7 +1188,7 @@ private suspend fun captureBestOfN(
     return if (jpeg != null) {
         BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
     } else {
-        bestBitmap
+        bestBitmap ?: lastBitmap ?: lastJpeg?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
     }
 }
 
