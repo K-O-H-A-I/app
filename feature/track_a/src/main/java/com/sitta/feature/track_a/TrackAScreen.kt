@@ -4,6 +4,7 @@ package com.sitta.feature.track_a
 
 import android.util.Log
 import android.graphics.Rect
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import androidx.camera.core.CameraSelector
@@ -239,7 +240,11 @@ fun TrackAScreen(
                             buildGuideRoi(imageProxy.width, imageProxy.height)
                         }
                     }
-                    val cropRect = imageProxy.cropRect
+                    val cropRect = if (imageProxy.cropRect.width() > 0 && imageProxy.cropRect.height() > 0) {
+                        imageProxy.cropRect
+                    } else {
+                        Rect(0, 0, imageProxy.width, imageProxy.height)
+                    }
                     val roi = centerCropRect(cropRect, 0.6f)
                     val lumaPrimary = extractRoiLumaInto(imageProxy, roi, lumaScratch)
                     val blurPrimary = computeLaplacianVarianceFast(lumaPrimary.luma, lumaPrimary.width, lumaPrimary.height)
@@ -252,12 +257,18 @@ fun TrackAScreen(
                     } else {
                         lumaPrimary
                     }
-                    val blur = if (useFallback) {
+                    var blur = if (useFallback) {
                         computeLaplacianVarianceFast(luma.luma, luma.width, luma.height)
                     } else {
                         blurPrimary
                     }
-                    val illumination = luma.mean
+                    var illumination = luma.mean
+                    if ((illumination == 0.0 && blur == 0.0) || luma.width == 0 || luma.height == 0) {
+                        val fallbackBitmap = yuvConverter.toBitmap(imageProxy, cropRect, 320)
+                        val fallbackMetrics = computeBitmapLumaAndBlur(fallbackBitmap)
+                        illumination = fallbackMetrics.mean
+                        blur = fallbackMetrics.blur
+                    }
                     val innerRoi = insetRect(metricsRoi, 0.15f)
                     val textureLuma = if (innerRoi.width() > 0 && innerRoi.height() > 0) {
                         extractRoiLumaInto(imageProxy, innerRoi, lumaScratch)
@@ -894,7 +905,7 @@ private class RoiLumaScratch {
 
 private fun extractRoiLumaInto(image: ImageProxy, roi: Rect, scratch: RoiLumaScratch): LumaRoi {
     val plane = image.planes[0]
-    val buffer = plane.buffer.duplicate()
+    val buffer = plane.buffer
     val rowStride = plane.rowStride
     val pixelStride = plane.pixelStride
     val width = roi.width().coerceAtLeast(0)
@@ -911,26 +922,34 @@ private fun extractRoiLumaInto(image: ImageProxy, roi: Rect, scratch: RoiLumaScr
     var sum = 0L
     var bright = 0L
     var outIndex = 0
+    val limit = buffer.limit()
     val start = roi.top * rowStride + roi.left * pixelStride
 
     for (row in 0 until height) {
         val rowStart = start + row * rowStride
-        buffer.position(rowStart)
         if (pixelStride == 1) {
-            buffer.get(out, outIndex, width)
-            for (i in 0 until width) {
-                val v = out[outIndex + i].toInt() and 0xFF
-                sum += v
-                if (v > 245) bright++
-            }
-            outIndex += width
-        } else {
             for (x in 0 until width) {
-                val v = buffer.get().toInt() and 0xFF
+                val idx = rowStart + x
+                val v = if (idx in 0 until limit) {
+                    buffer.get(idx).toInt() and 0xFF
+                } else {
+                    0
+                }
                 out[outIndex++] = v.toByte()
                 sum += v
                 if (v > 245) bright++
-                for (skip in 1 until pixelStride) buffer.get()
+            }
+        } else {
+            for (x in 0 until width) {
+                val idx = rowStart + x * pixelStride
+                val v = if (idx in 0 until limit) {
+                    buffer.get(idx).toInt() and 0xFF
+                } else {
+                    0
+                }
+                out[outIndex++] = v.toByte()
+                sum += v
+                if (v > 245) bright++
             }
         }
     }
@@ -967,6 +986,59 @@ private fun computeLaplacianVarianceFast(luma: ByteArray, width: Int, height: In
         }
     }
     return if (count > 1) m2 / count.toDouble() else 0.0
+}
+
+private data class BitmapLumaMetrics(
+    val mean: Double,
+    val blur: Double,
+)
+
+private fun computeBitmapLumaAndBlur(bitmap: Bitmap): BitmapLumaMetrics {
+    val width = bitmap.width.coerceAtLeast(1)
+    val height = bitmap.height.coerceAtLeast(1)
+    val pixels = IntArray(width * height)
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+    var sum = 0L
+    for (i in pixels.indices) {
+        val c = pixels[i]
+        val r = (c shr 16) and 0xFF
+        val g = (c shr 8) and 0xFF
+        val b = c and 0xFF
+        sum += (0.2126 * r + 0.7152 * g + 0.0722 * b).toInt()
+    }
+    val mean = sum.toDouble() / pixels.size.toDouble()
+
+    if (width < 3 || height < 3) {
+        return BitmapLumaMetrics(mean = mean, blur = 0.0)
+    }
+
+    var lapMean = 0.0
+    var lapM2 = 0.0
+    var count = 0L
+    fun lumaAt(x: Int, y: Int): Int {
+        val c = pixels[y * width + x]
+        val r = (c shr 16) and 0xFF
+        val g = (c shr 8) and 0xFF
+        val b = c and 0xFF
+        return (0.2126 * r + 0.7152 * g + 0.0722 * b).toInt()
+    }
+    for (y in 1 until height - 1) {
+        for (x in 1 until width - 1) {
+            val c = lumaAt(x, y)
+            val u = lumaAt(x, y - 1)
+            val d = lumaAt(x, y + 1)
+            val l = lumaAt(x - 1, y)
+            val r = lumaAt(x + 1, y)
+            val lap = (u + d + l + r - (c shl 2)).toDouble()
+            count++
+            val delta = lap - lapMean
+            lapMean += delta / count.toDouble()
+            lapM2 += delta * (lap - lapMean)
+        }
+    }
+    val blur = if (count > 1) lapM2 / count.toDouble() else 0.0
+    return BitmapLumaMetrics(mean = mean, blur = blur)
 }
 
 private fun insetRect(rect: Rect, ratio: Float): Rect {
