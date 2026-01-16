@@ -7,6 +7,7 @@ import android.graphics.Rect
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.view.View
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
@@ -19,6 +20,7 @@ import androidx.camera.view.PreviewView
 import androidx.camera.view.TransformExperimental
 import androidx.camera.view.transform.CoordinateTransform
 import androidx.camera.view.transform.ImageProxyTransformFactory
+import androidx.camera.view.transform.OutputTransform
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,6 +80,7 @@ import com.sitta.feature.track_a.BuildConfig
 import com.sitta.core.data.AuthManager
 import com.sitta.core.data.ConfigRepo
 import com.sitta.core.data.SessionRepository
+import java.util.concurrent.atomic.AtomicReference
 import com.sitta.core.data.SettingsRepository
 import com.sitta.core.domain.LivenessDetector
 import com.sitta.core.domain.QualityAnalyzer
@@ -167,7 +170,20 @@ fun TrackAScreen(
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val previewOutputTransformRef = remember { AtomicReference<OutputTransform?>(null) }
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
+    DisposableEffect(previewView) {
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            @OptIn(TransformExperimental::class)
+            previewOutputTransformRef.set(previewView.outputTransform)
+        }
+        previewView.addOnLayoutChangeListener(listener)
+        @OptIn(TransformExperimental::class)
+        previewOutputTransformRef.set(previewView.outputTransform)
+        onDispose {
+            previewView.removeOnLayoutChangeListener(listener)
+        }
+    }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val captureExecutor = remember { Executors.newSingleThreadExecutor() }
     val yuvConverter = remember { YuvToRgbConverter() }
@@ -219,7 +235,7 @@ fun TrackAScreen(
                     val now = System.currentTimeMillis()
                     @OptIn(TransformExperimental::class)
                     val mappedRoi = run {
-                        val previewTransform = previewView.outputTransform
+                        val previewTransform = previewOutputTransformRef.get()
                         if (previewTransform != null && previewView.width > 0 && previewView.height > 0) {
                             val imageTransform = transformFactory.getOutputTransform(imageProxy)
                             if (analysisSize == null ||
