@@ -763,7 +763,7 @@ class TrackAViewModel(
             (frame.timestamp - lastFingertipModeAt) <= TrackACaptureConfig.fingertipModeHoldMs
         currentCaptureMode = if (fingertipMode) "fingertip_only" else "full_hand"
         val detectionPass = if (fingertipMode) {
-            fingertipTextureOk
+            fingertipTextureOk && qualityGoodForFingertip && steadyScoreRaw >= steadyThreshold
         } else {
             detectionFresh && detection.isDetected &&
                 (detection.landmarks.isNotEmpty() || (detection.boundingBox != null && presenceCoverage))
@@ -1060,8 +1060,9 @@ class TrackAViewModel(
         if (center == null || prev == null || roi.width() <= 0 || roi.height() <= 0) {
             return activeConfig.stabilityMax + 1
         }
-        val dx = (center.first - prev.first) / roi.width().toDouble()
-        val dy = (center.second - prev.second) / roi.height().toDouble()
+        val denom = max(roi.width(), roi.height()).coerceAtLeast(200).toDouble()
+        val dx = (center.first - prev.first) / denom
+        val dy = (center.second - prev.second) / denom
         return hypot(dx, dy) * 100.0
     }
 

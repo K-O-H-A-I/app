@@ -851,11 +851,10 @@ private fun mapLandmarksToPreview(
         return landmarks
     }
     val (imageW, imageH) = analysisSize
-    val crop = analysisCrop ?: Rect(0, 0, imageW, imageH)
     return landmarks.mapNotNull { lm ->
         val point = PointF(
-            crop.left + lm.x * crop.width(),
-            crop.top + lm.y * crop.height(),
+            lm.x * imageW,
+            lm.y * imageH,
         )
         imageToPreview.mapPoint(point)
         if (point.x.isNaN() || point.y.isNaN()) return@mapNotNull null
