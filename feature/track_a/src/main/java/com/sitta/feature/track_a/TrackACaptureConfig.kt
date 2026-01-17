@@ -34,8 +34,8 @@ object TrackACaptureConfig {
     const val autoCaptureScaleMin = 1.05f
     const val autoCaptureFocusMin = 80
     const val autoCaptureSteadyMin = 80
-    const val autoCaptureEdgeDensityMin = 0.24
-    const val autoCaptureTextureVarianceMin = 0.14
+    const val autoCaptureEdgeDensityMin = 0.20
+    const val autoCaptureTextureVarianceMin = 0.10
     const val focusHoldMs = 180L
     const val focusRefreshMs = 2000L
     const val focusMaxWaitMs = 220L
@@ -51,8 +51,8 @@ object TrackACaptureConfig {
     const val forceAutoCapture = true
     const val fingertipModeDelayMs = 400L
     const val fingertipModeHoldMs = 600L
-    const val fingerEdgeDensityMin = 0.18
-    const val fingerTextureVarianceMin = 0.08
+    const val fingerEdgeDensityMin = 0.14
+    const val fingerTextureVarianceMin = 0.06
     const val fingerTextureVarianceObviousMin = 0.02
     const val fingerIntensityMin = 50.0
     const val fingerIntensityMax = 210.0

@@ -246,17 +246,28 @@ class CloseUpFingerDetector(
         var count = 0
         val step = max(1, (rows * cols) / maxSampleCount)
         var idx = 0
-        val rowValues = DoubleArray(cols)
+        val useFloat = mat.type() == CvType.CV_32F
+        val rowValues = if (useFloat) null else DoubleArray(cols)
+        val rowValuesF = if (useFloat) FloatArray(cols) else null
         val maskRow = ByteArray(cols)
         for (y in 0 until rows) {
-            mat.get(y, 0, rowValues)
+            if (useFloat) {
+                mat.get(y, 0, rowValuesF)
+            } else {
+                mat.get(y, 0, rowValues)
+            }
             if (!mask.empty()) {
                 mask.get(y, 0, maskRow)
             }
             for (x in 0 until cols) {
                 if (mask.empty() || (maskRow[x].toInt() and 0xFF) > 0) {
                     if (idx % step == 0 && count < maxSampleCount) {
-                        samples[count++] = rowValues[x]
+                        val value = if (useFloat) {
+                            rowValuesF!![x].toDouble()
+                        } else {
+                            rowValues!![x]
+                        }
+                        samples[count++] = value
                     }
                     idx++
                 }
@@ -272,11 +283,22 @@ class CloseUpFingerDetector(
         val rows = mat.rows()
         val cols = mat.cols()
         var count = 0.0
-        val rowValues = DoubleArray(cols)
+        val useFloat = mat.type() == CvType.CV_32F
+        val rowValues = if (useFloat) null else DoubleArray(cols)
+        val rowValuesF = if (useFloat) FloatArray(cols) else null
         for (y in 0 until rows) {
-            mat.get(y, 0, rowValues)
+            if (useFloat) {
+                mat.get(y, 0, rowValuesF)
+            } else {
+                mat.get(y, 0, rowValues)
+            }
             for (x in 0 until cols) {
-                if (rowValues[x] > threshold) count++
+                val value = if (useFloat) {
+                    rowValuesF!![x].toDouble()
+                } else {
+                    rowValues!![x]
+                }
+                if (value > threshold) count++
             }
         }
         return count

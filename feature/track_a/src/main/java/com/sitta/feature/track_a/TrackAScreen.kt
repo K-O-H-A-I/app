@@ -322,10 +322,7 @@ fun TrackAScreen(
                         fallbackRoi.width() > 0 &&
                         fallbackRoi.height() > 0
                     ) {
-                        val closeUpRoi = insetRect(fallbackRoi, 0.12f).takeIf {
-                            it.width() > 0 && it.height() > 0
-                        } ?: fallbackRoi
-                        val closeUpBitmap = yuvConverter.toBitmap(imageProxy, closeUpRoi, 320)
+                        val closeUpBitmap = yuvConverter.toBitmap(imageProxy, fallbackRoi, 320)
                         val closeUpResult = closeUpDetector.detect(closeUpBitmap)
                         viewModel.onCloseUpFingerResult(closeUpResult, now)
                         lastCloseUpAtMs = now
