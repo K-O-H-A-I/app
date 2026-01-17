@@ -69,9 +69,10 @@ class CloseUpFingerDetector(
 
     fun detect(bitmap: Bitmap): CloseUpFingerResult {
         return runCatching {
-            val kernels = gaborKernels ?: buildGaborKernels().also { gaborKernels = it }
+            if (!OpenCvUtils.ensureLoadedOrFalse()) return@runCatching emptyResult()
             val rgba = OpenCvUtils.bitmapToMat(bitmap)
             if (rgba.empty()) return@runCatching emptyResult()
+            val kernels = gaborKernels ?: buildGaborKernels().also { gaborKernels = it }
 
             val bgr = Mat()
             when (rgba.channels()) {

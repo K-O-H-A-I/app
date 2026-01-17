@@ -16,6 +16,10 @@ object OpenCvUtils {
         loaded.value
     }
 
+    fun ensureLoadedOrFalse(): Boolean {
+        return loaded.value
+    }
+
     fun bitmapToMat(bitmap: Bitmap): Mat {
         ensureLoaded()
         val mat = Mat()
