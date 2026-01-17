@@ -89,6 +89,7 @@ import com.sitta.core.vision.FingerDetector
 import com.sitta.core.vision.FingerLandmark
 import com.sitta.core.vision.FingerMasker
 import com.sitta.core.vision.FingerSceneAnalyzer
+import com.sitta.core.vision.CloseUpFingerDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -188,8 +189,10 @@ fun TrackAScreen(
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val captureExecutor = remember { Executors.newSingleThreadExecutor() }
     val yuvConverter = remember { YuvToRgbConverter() }
+    val closeUpDetector = remember { CloseUpFingerDetector() }
     val lumaScratch = remember { RoiLumaScratch() }
     var lastLandmarkAtMs by remember { mutableStateOf(0L) }
+    var lastCloseUpAtMs by remember { mutableStateOf(0L) }
     var useFrontCamera by remember { mutableStateOf(false) }
     val captureScope = rememberCoroutineScope()
     var captureBurstInFlight by remember { mutableStateOf(false) }
@@ -314,6 +317,16 @@ fun TrackAScreen(
                         frameHeight = imageProxy.height,
                         timestampMillis = now,
                     )
+                    if (TrackACaptureConfig.closeUpDetectorEnabled &&
+                        now - lastCloseUpAtMs >= TrackACaptureConfig.closeUpCadenceMs &&
+                        fallbackRoi.width() > 0 &&
+                        fallbackRoi.height() > 0
+                    ) {
+                        val closeUpBitmap = yuvConverter.toBitmap(imageProxy, fallbackRoi, 320)
+                        val closeUpResult = closeUpDetector.detect(closeUpBitmap)
+                        viewModel.onCloseUpFingerResult(closeUpResult, now)
+                        lastCloseUpAtMs = now
+                    }
 
                     val cadenceMs = viewModel.landmarkCadenceMs(blur, illumination, now)
                     if (now - lastLandmarkAtMs >= cadenceMs) {
@@ -524,6 +537,17 @@ fun TrackAScreen(
                             color = Color(0xFFB8C0CC),
                             fontSize = 12.sp,
                         )
+                        if (uiState.debugOverlayEnabled) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "CloseUp ${"%.2f".format(uiState.closeUpConfidence)} " +
+                                    "skin ${"%.2f".format(uiState.closeUpSkinRatio)} " +
+                                    "ridge ${"%.2f".format(uiState.closeUpRidgeScore)} " +
+                                    "edge ${"%.2f".format(uiState.closeUpEdgeScore)}",
+                                color = Color(0xFF93A3B5),
+                                fontSize = 11.sp,
+                            )
+                        }
                     }
                 }
 

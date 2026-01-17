@@ -56,4 +56,9 @@ object TrackACaptureConfig {
     const val fingerTextureVarianceObviousMin = 0.02
     const val fingerIntensityMin = 50.0
     const val fingerIntensityMax = 210.0
+    const val closeUpDetectorEnabled = true
+    const val closeUpCadenceMs = 120L
+    const val closeUpStaleMs = 450L
+    const val closeUpConfidenceMin = 0.55
+    const val closeUpRidgeMin = 0.3
 }

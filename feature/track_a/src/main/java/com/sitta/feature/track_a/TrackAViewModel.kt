@@ -26,6 +26,7 @@ import com.sitta.core.vision.LandmarkType
 import com.sitta.core.vision.FingerDetector
 import com.sitta.core.vision.FingerMasker
 import com.sitta.core.vision.FingerSceneAnalyzer
+import com.sitta.core.vision.CloseUpFingerResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,6 +94,8 @@ class TrackAViewModel(
     private var lastFingertipModeAt: Long = 0L
     private var readySinceMs: Long? = null
     private var autoCaptureToken: Long = 0L
+    private var lastCloseUpResult: CloseUpFingerResult? = null
+    private var lastCloseUpMillis: Long = 0L
 
     init {
         fingerDetector.initialize()
@@ -191,6 +194,17 @@ class TrackAViewModel(
             }
             evaluateLivenessIfNeeded(bitmap, livenessRoi)
         }
+    }
+
+    fun onCloseUpFingerResult(result: CloseUpFingerResult, timestampMillis: Long) {
+        lastCloseUpResult = result
+        lastCloseUpMillis = timestampMillis
+        _uiState.value = _uiState.value.copy(
+            closeUpConfidence = result.confidence,
+            closeUpSkinRatio = result.skinRatio,
+            closeUpRidgeScore = result.ridgeScore,
+            closeUpEdgeScore = result.edgeScore,
+        )
     }
 
     fun computeLandmarkCropRect(
@@ -725,6 +739,9 @@ class TrackAViewModel(
             ?: FingerDetectionResult.notDetected()
         val landmarkAge = if (lastLandmarkMillis == 0L) Long.MAX_VALUE else frame.timestamp - lastLandmarkMillis
         val hasRecentLandmarks = lastLandmarks.isNotEmpty() && landmarkAge <= TrackACaptureConfig.landmarkStaleMs
+        val closeUp = lastCloseUpResult?.takeIf {
+            frame.timestamp - lastCloseUpMillis <= TrackACaptureConfig.closeUpStaleMs
+        }
         val detection = when {
             rawDetection.isDetected -> rawDetection
             hasRecentLandmarks -> rawDetection.copy(
@@ -770,6 +787,10 @@ class TrackAViewModel(
             steadyScoreRaw >= steadyThreshold
         val qualityGoodForFingertip = focusScore >= focusThreshold && lightScore >= lightThreshold
         val fingertipTextureOk = isFingertipTexture(frame.edgeDensity, frame.textureVariance, frame.illuminationMean)
+        val closeUpEligible = closeUp?.let { result ->
+            result.confidence >= TrackACaptureConfig.closeUpConfidenceMin ||
+                (result.skinDetected && result.ridgeScore >= TrackACaptureConfig.closeUpRidgeMin)
+        } == true
         val weakDetection = detection.isDetected &&
             detection.landmarks.isEmpty() &&
             detection.boundingBox == null
@@ -790,7 +811,7 @@ class TrackAViewModel(
         val missingGeometry = !detection.isDetected || weakDetection || geometryPoor
         val noHandButTexture = missingGeometry && fingertipTextureOk
         val fingertipModeRaw = (landmarkStaleDuration >= TrackACaptureConfig.fingertipModeDelayMs &&
-            fingertipTextureOk) ||
+            closeUpEligible && fingertipTextureOk) ||
             noHandButTexture
         if (fingertipModeRaw) {
             lastFingertipModeAt = frame.timestamp
@@ -799,7 +820,7 @@ class TrackAViewModel(
             (frame.timestamp - lastFingertipModeAt) <= TrackACaptureConfig.fingertipModeHoldMs
         currentCaptureMode = if (fingertipMode) "fingertip_only" else "full_hand"
         val detectionPass = if (fingertipMode) {
-            fingertipTextureOk && qualityGoodForFingertip && steadyScoreRaw >= steadyThreshold
+            closeUpEligible && fingertipTextureOk && qualityGoodForFingertip && steadyScoreRaw >= steadyThreshold
         } else {
             detectionFresh && detection.isDetected &&
                 (detection.landmarks.isNotEmpty() || (detection.boundingBox != null && presenceCoverage))
@@ -914,8 +935,9 @@ class TrackAViewModel(
         )
 
         val autoCaptureCloseEnough = if (fingertipMode) {
-            frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
-                frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin
+            closeUpEligible ||
+                (frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
+                    frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin)
         } else {
             scaleRatio >= TrackACaptureConfig.autoCaptureScaleMin
         }
@@ -1276,6 +1298,10 @@ data class TrackAUiState(
     val steadyScore: Int = 0,
     val fingerScalePx: Float = 0f,
     val focusRequested: Boolean = false,
+    val closeUpConfidence: Double = 0.0,
+    val closeUpSkinRatio: Double = 0.0,
+    val closeUpRidgeScore: Double = 0.0,
+    val closeUpEdgeScore: Double = 0.0,
     val message: String? = null,
     val captureNotice: String? = null,
     val captureSource: CaptureSource? = null,
