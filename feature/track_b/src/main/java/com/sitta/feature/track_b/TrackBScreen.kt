@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -51,6 +52,8 @@ import com.sitta.core.data.AuthManager
 import com.sitta.core.data.SessionRepository
 import com.sitta.core.domain.EnhancementPipeline
 import com.sitta.core.domain.QualityAnalyzer
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 
 class TrackBViewModelFactory(
     private val sessionRepository: SessionRepository,
@@ -100,6 +103,7 @@ fun TrackBScreen(
         ),
     )
     val uiState by viewModel.uiState.collectAsState()
+    var showExportDialog by remember { mutableStateOf(false) }
 
     BackHandler { onBack() }
 
@@ -195,13 +199,38 @@ fun TrackBScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
-                onClick = { viewModel.exportEnhanced() },
+                onClick = { showExportDialog = true },
                 modifier = Modifier.weight(1f).height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14B8A6)),
                 shape = RoundedCornerShape(20.dp),
             ) {
                 Text(text = "Save & Export", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
+        }
+
+        if (showExportDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                title = { Text(text = "Export format", color = Color.White) },
+                text = { Text(text = "Choose a format to export.", color = Color(0xFFCBD5F5)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showExportDialog = false
+                        viewModel.exportEnhanced(ExportFormat.PNG)
+                    }) {
+                        Text(text = "PNG", color = Color(0xFF14B8A6))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showExportDialog = false
+                        viewModel.exportEnhanced(ExportFormat.TIFF)
+                    }) {
+                        Text(text = "TIFF", color = Color(0xFF14B8A6))
+                    }
+                },
+                containerColor = Color(0xFF1C1F24),
+            )
         }
     }
 }

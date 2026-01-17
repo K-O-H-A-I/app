@@ -197,8 +197,16 @@ class TrackAViewModel(
     }
 
     fun onCloseUpFingerResult(result: CloseUpFingerResult, timestampMillis: Long) {
-        lastCloseUpResult = result
-        lastCloseUpMillis = timestampMillis
+        val hasSignal = result.skinRatio > 0.01 ||
+            result.edgeScore > 0.0 ||
+            result.ridgeScore > 0.0
+        if (hasSignal) {
+            lastCloseUpResult = result
+            lastCloseUpMillis = timestampMillis
+        } else {
+            lastCloseUpResult = null
+            lastCloseUpMillis = 0L
+        }
         _uiState.value = _uiState.value.copy(
             closeUpConfidence = result.confidence,
             closeUpSkinRatio = result.skinRatio,
@@ -789,7 +797,10 @@ class TrackAViewModel(
         val fingertipTextureOk = isFingertipTexture(frame.edgeDensity, frame.textureVariance, frame.illuminationMean)
         val closeUpEligible = closeUp?.let { result ->
             result.confidence >= TrackACaptureConfig.closeUpConfidenceMin ||
-                (result.skinDetected && result.ridgeScore >= TrackACaptureConfig.closeUpRidgeMin)
+                (result.skinDetected &&
+                    result.skinRatio >= TrackACaptureConfig.closeUpSkinRatioMin &&
+                    result.areaRatio >= TrackACaptureConfig.closeUpAreaRatioMin &&
+                    result.solidity >= TrackACaptureConfig.closeUpSolidityMin)
         } == true
         val weakDetection = detection.isDetected &&
             detection.landmarks.isEmpty() &&
@@ -820,7 +831,11 @@ class TrackAViewModel(
             (frame.timestamp - lastFingertipModeAt) <= TrackACaptureConfig.fingertipModeHoldMs
         currentCaptureMode = if (fingertipMode) "fingertip_only" else "full_hand"
         val detectionPass = if (fingertipMode) {
-            closeUpEligible && fingertipTextureOk && qualityGoodForFingertip && steadyScoreRaw >= steadyThreshold
+            if (closeUp != null) {
+                closeUpEligible && qualityGoodForFingertip && steadyScoreRaw >= steadyThreshold
+            } else {
+                fingertipTextureOk && qualityGoodForFingertip && steadyScoreRaw >= steadyThreshold
+            }
         } else {
             detectionFresh && detection.isDetected &&
                 (detection.landmarks.isNotEmpty() || (detection.boundingBox != null && presenceCoverage))
@@ -918,7 +933,8 @@ class TrackAViewModel(
                 combinedPass -> null
                 livenessEnabled && !livenessPass -> "Liveness failed"
                 fingertipMode -> "Close-up mode - hold still"
-                closeUpEligible -> "Close-up mode - hold still"
+                closeUp != null && closeUpEligible -> "Close-up mode - hold still"
+                closeUp != null && closeUp.skinDetected -> "Move closer to the camera"
                 !detectionFresh && fingertipTextureOk -> "Close-up mode - hold still"
                 !detectionFresh -> "Keep hand in view"
                 noHandButTexture -> "Close-up mode - hold still"

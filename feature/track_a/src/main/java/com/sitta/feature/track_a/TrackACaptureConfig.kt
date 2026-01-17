@@ -31,7 +31,7 @@ object TrackACaptureConfig {
     const val torchDebounceMs = 900L
     const val torchMinOnMs = 3500L
     const val autoCaptureCooldownMs = 1400L
-    const val autoCaptureScaleMin = 0.72f
+    const val autoCaptureScaleMin = 1.05f
     const val autoCaptureFocusMin = 80
     const val autoCaptureSteadyMin = 80
     const val autoCaptureEdgeDensityMin = 0.24
@@ -59,6 +59,9 @@ object TrackACaptureConfig {
     const val closeUpDetectorEnabled = true
     const val closeUpCadenceMs = 120L
     const val closeUpStaleMs = 450L
-    const val closeUpConfidenceMin = 0.55
+    const val closeUpConfidenceMin = 0.45
     const val closeUpRidgeMin = 0.3
+    const val closeUpSkinRatioMin = 0.10
+    const val closeUpAreaRatioMin = 0.08
+    const val closeUpSolidityMin = 0.6
 }

@@ -6,6 +6,8 @@ import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Mat
 import org.opencv.core.Rect as CvRect
+import org.opencv.imgcodecs.Imgcodecs
+import java.io.File
 
 object OpenCvUtils {
     private val loaded = lazy { OpenCVLoader.initDebug() }
@@ -24,6 +26,13 @@ object OpenCvUtils {
     fun cropMat(mat: Mat, roi: Rect): Mat {
         val safe = clampRoi(roi, mat.cols(), mat.rows())
         return Mat(mat, CvRect(safe.left, safe.top, safe.width(), safe.height()))
+    }
+
+    fun saveBitmapAsTiff(bitmap: Bitmap, outputFile: File): Boolean {
+        ensureLoaded()
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+        return Imgcodecs.imwrite(outputFile.absolutePath, mat)
     }
 
     fun clampRoi(roi: Rect, width: Int, height: Int): Rect {

@@ -18,11 +18,14 @@ import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.domain.QualityResult
 import com.sitta.core.vision.FingerRidgeExtractor
 import com.sitta.core.vision.FingerSkeletonizer
+import com.sitta.core.vision.OpenCvUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileInputStream
 
 class TrackBViewModel(
     private val sessionRepository: SessionRepository,
@@ -68,16 +71,25 @@ class TrackBViewModel(
         }
     }
 
-    fun exportEnhanced() {
+    fun exportEnhanced(format: ExportFormat) {
         val enhanced = _uiState.value.enhancedBitmap ?: return
         val session = _uiState.value.session ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, enhanced)
-            val saved = saveToGallery(enhanced)
-            val message = if (saved != null) {
-                "Saved to session and gallery"
-            } else {
-                "Saved to session (gallery save failed)"
+            val message = when (format) {
+                ExportFormat.PNG -> {
+                    sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, enhanced)
+                    val saved = saveToGallery(enhanced, "image/png", "png")
+                    if (saved != null) "Saved PNG to session and gallery" else "Saved PNG to session"
+                }
+                ExportFormat.TIFF -> {
+                    val tiffSaved = saveTiffToSession(session, ArtifactFilenames.ENHANCED_TIFF, enhanced)
+                    val saved = if (tiffSaved != null) {
+                        saveFileToGallery(tiffSaved, "image/tiff", "tiff")
+                    } else {
+                        null
+                    }
+                    if (saved != null) "Saved TIFF to session and gallery" else "Saved TIFF to session"
+                }
             }
             _uiState.value = _uiState.value.copy(message = message)
         }
@@ -139,12 +151,12 @@ class TrackBViewModel(
         return if (total > 0) active / total else 0.0
     }
 
-    private fun saveToGallery(bitmap: Bitmap): Uri? {
+    private fun saveToGallery(bitmap: Bitmap, mimeType: String, ext: String): Uri? {
         val resolver = appContext.contentResolver
-        val name = "sitta_enhanced_${System.currentTimeMillis()}.png"
+        val name = "sitta_enhanced_${System.currentTimeMillis()}.$ext"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/SITTA")
             }
@@ -160,6 +172,36 @@ class TrackBViewModel(
         } catch (_: Throwable) {
             null
         }
+    }
+
+    private fun saveFileToGallery(file: File, mimeType: String, ext: String): Uri? {
+        val resolver = appContext.contentResolver
+        val name = "sitta_enhanced_${System.currentTimeMillis()}.$ext"
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/SITTA")
+            }
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        return try {
+            resolver.openOutputStream(uri)?.use { out ->
+                FileInputStream(file).use { input -> input.copyTo(out) }
+            } ?: return null
+            uri
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun saveTiffToSession(session: SessionInfo, filename: String, bitmap: Bitmap): File? {
+        return runCatching {
+            val dir = sessionRepository.sessionDir(session)
+            if (!dir.exists()) dir.mkdirs()
+            val file = File(dir, filename)
+            if (!OpenCvUtils.saveBitmapAsTiff(bitmap, file)) null else file
+        }.getOrNull()
     }
 
     fun clearMessage() {
@@ -179,3 +221,8 @@ data class TrackBUiState(
     val session: SessionInfo? = null,
     val message: String? = null,
 )
+
+enum class ExportFormat {
+    PNG,
+    TIFF,
+}

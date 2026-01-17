@@ -322,7 +322,10 @@ fun TrackAScreen(
                         fallbackRoi.width() > 0 &&
                         fallbackRoi.height() > 0
                     ) {
-                        val closeUpBitmap = yuvConverter.toBitmap(imageProxy, fallbackRoi, 320)
+                        val closeUpRoi = insetRect(fallbackRoi, 0.12f).takeIf {
+                            it.width() > 0 && it.height() > 0
+                        } ?: fallbackRoi
+                        val closeUpBitmap = yuvConverter.toBitmap(imageProxy, closeUpRoi, 320)
                         val closeUpResult = closeUpDetector.detect(closeUpBitmap)
                         viewModel.onCloseUpFingerResult(closeUpResult, now)
                         lastCloseUpAtMs = now
@@ -823,7 +826,7 @@ private fun StatusBanner(isReady: Boolean, message: String?) {
             .padding(bottom = 8.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
-        Text(text = text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(text = text, color = color, fontSize = 18.sp, fontWeight = FontWeight.Medium)
     }
 }
 

@@ -1,7 +1,6 @@
 package com.sitta.core.vision
 
 import android.graphics.Bitmap
-import org.opencv.android.OpenCVLoader
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -12,6 +11,7 @@ import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
+import android.util.Log
 import kotlin.math.max
 import kotlin.math.min
 
@@ -69,13 +69,18 @@ class CloseUpFingerDetector(
 
     fun detect(bitmap: Bitmap): CloseUpFingerResult {
         return runCatching {
-            if (!OpenCVLoader.initDebug()) return@runCatching emptyResult()
             val kernels = gaborKernels ?: buildGaborKernels().also { gaborKernels = it }
             val rgba = OpenCvUtils.bitmapToMat(bitmap)
             if (rgba.empty()) return@runCatching emptyResult()
 
             val bgr = Mat()
-            Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
+            when (rgba.channels()) {
+                4 -> Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
+                3 -> Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGB2BGR)
+                2 -> Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_BGR5652BGR)
+                1 -> Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_GRAY2BGR)
+                else -> return@runCatching emptyResult()
+            }
             val hsv = Mat()
             val ycrcb = Mat()
             Imgproc.cvtColor(bgr, hsv, Imgproc.COLOR_BGR2HSV)
@@ -121,6 +126,7 @@ class CloseUpFingerDetector(
                 ridgesFound = ridgesFound,
             )
         }.getOrElse {
+            Log.w("CloseUpFingerDetector", "Close-up detection failed", it)
             emptyResult()
         }
     }

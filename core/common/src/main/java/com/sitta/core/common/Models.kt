@@ -7,6 +7,7 @@ object ArtifactFilenames {
     const val ROI = "roi.png"
     const val SEGMENTED = "segmented.png"
     const val ENHANCED = "enhanced.png"
+    const val ENHANCED_TIFF = "enhanced.tiff"
     const val SKELETON = "skeleton.png"
     const val QUALITY = "quality.json"
     const val MATCH = "match.json"
