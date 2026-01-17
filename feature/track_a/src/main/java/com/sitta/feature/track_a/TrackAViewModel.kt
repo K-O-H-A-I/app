@@ -918,6 +918,7 @@ class TrackAViewModel(
                 combinedPass -> null
                 livenessEnabled && !livenessPass -> "Liveness failed"
                 fingertipMode -> "Close-up mode - hold still"
+                closeUpEligible -> "Close-up mode - hold still"
                 !detectionFresh && fingertipTextureOk -> "Close-up mode - hold still"
                 !detectionFresh -> "Keep hand in view"
                 noHandButTexture -> "Close-up mode - hold still"
@@ -934,10 +935,11 @@ class TrackAViewModel(
             },
         )
 
-        val autoCaptureCloseEnough = if (fingertipMode) {
-            closeUpEligible ||
-                (frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
-                    frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin)
+        val autoCaptureCloseEnough = if (closeUp != null) {
+            closeUpEligible
+        } else if (fingertipMode) {
+            frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
+                frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin
         } else {
             scaleRatio >= TrackACaptureConfig.autoCaptureScaleMin
         }

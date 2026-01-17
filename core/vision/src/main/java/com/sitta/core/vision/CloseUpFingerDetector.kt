@@ -1,7 +1,7 @@
 package com.sitta.core.vision
 
 import android.graphics.Bitmap
-import org.opencv.android.Utils
+import org.opencv.android.OpenCVLoader
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
@@ -44,7 +44,7 @@ class CloseUpFingerDetector(
 
     private val gaborFrequencies = doubleArrayOf(0.1, 0.15, 0.2)
     private val gaborOrientations = 8
-    private val gaborKernels: List<Mat> = buildGaborKernels()
+    private var gaborKernels: List<Mat>? = null
 
     private fun buildGaborKernels(): List<Mat> {
         val kernels = ArrayList<Mat>()
@@ -69,10 +69,13 @@ class CloseUpFingerDetector(
 
     fun detect(bitmap: Bitmap): CloseUpFingerResult {
         return runCatching {
-            val bgr = Mat()
-            Utils.bitmapToMat(bitmap, bgr)
-            if (bgr.empty()) return@runCatching emptyResult()
+            if (!OpenCVLoader.initDebug()) return@runCatching emptyResult()
+            val kernels = gaborKernels ?: buildGaborKernels().also { gaborKernels = it }
+            val rgba = OpenCvUtils.bitmapToMat(bitmap)
+            if (rgba.empty()) return@runCatching emptyResult()
 
+            val bgr = Mat()
+            Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
             val hsv = Mat()
             val ycrcb = Mat()
             Imgproc.cvtColor(bgr, hsv, Imgproc.COLOR_BGR2HSV)
@@ -90,7 +93,7 @@ class CloseUpFingerDetector(
                 ShapeResult(false, 0.0, 0.0, -1.0, -1.0)
             }
 
-            val ridgeScore = detectRidges(gray, skinMask)
+            val ridgeScore = detectRidges(gray, skinMask, kernels)
             val ridgesFound = ridgeScore > 0.3
             val edgeScore = analyzeEdges(gray, skinMask)
 
@@ -181,13 +184,13 @@ class CloseUpFingerDetector(
         return hull
     }
 
-    private fun detectRidges(gray: Mat, mask: Mat): Double {
+    private fun detectRidges(gray: Mat, mask: Mat, kernels: List<Mat>): Double {
         val grayNorm = Mat()
         Core.normalize(gray, grayNorm, 0.0, 255.0, Core.NORM_MINMAX)
 
         val combined = Mat.zeros(grayNorm.size(), CvType.CV_32F)
         val response = Mat()
-        for (kernel in gaborKernels) {
+        for (kernel in kernels) {
             Imgproc.filter2D(grayNorm, response, CvType.CV_32F, kernel)
             Core.absdiff(response, Scalar.all(0.0), response)
             Core.max(combined, response, combined)
