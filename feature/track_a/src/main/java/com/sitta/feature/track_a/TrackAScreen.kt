@@ -451,7 +451,7 @@ fun TrackAScreen(
             }
         } catch (t: Throwable) {
             Log.e("TrackA", "Auto capture failed", t)
-            viewModel.onAutoCaptureFailure()
+            viewModel.capture()
         } finally {
             captureBurstInFlight = false
         }
@@ -550,7 +550,7 @@ fun TrackAScreen(
                                     imageCapture = imageCapture,
                                     captureExecutor = captureExecutor,
                                     converter = yuvConverter,
-                                    n = 3,
+                                    n = 1,
                                     scoreFn = { bitmap ->
                                         withContext(Dispatchers.Default) { viewModel.scoreCandidate(bitmap) }
                                     },
@@ -1298,7 +1298,7 @@ private fun CaptureButton(enabled: Boolean, onClick: () -> Unit) {
             .size(84.dp)
             .background(Color.Transparent, CircleShape)
             .semantics { contentDescription = "Capture" }
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
