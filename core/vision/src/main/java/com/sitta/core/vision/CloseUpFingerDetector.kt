@@ -45,6 +45,27 @@ class CloseUpFingerDetector(
     private val gaborFrequencies = doubleArrayOf(0.1, 0.15, 0.2)
     private val gaborOrientations = 8
     private var gaborKernels: List<Mat>? = null
+    private var gaborAvailable: Boolean? = null
+
+    private fun getGaborKernels(): List<Mat> {
+        val cached = gaborKernels
+        if (cached != null) return cached
+        if (gaborAvailable == false) return emptyList()
+        return try {
+            buildGaborKernels().also {
+                gaborKernels = it
+                gaborAvailable = true
+            }
+        } catch (t: UnsatisfiedLinkError) {
+            Log.w("CloseUpFingerDetector", "Gabor kernel unavailable, disabling ridge detection", t)
+            gaborAvailable = false
+            emptyList()
+        } catch (t: Throwable) {
+            Log.w("CloseUpFingerDetector", "Gabor kernel failed, disabling ridge detection", t)
+            gaborAvailable = false
+            emptyList()
+        }
+    }
 
     private fun buildGaborKernels(): List<Mat> {
         val kernels = ArrayList<Mat>()
@@ -72,7 +93,7 @@ class CloseUpFingerDetector(
             if (!OpenCvUtils.ensureLoadedOrFalse()) return@runCatching emptyResult()
             val rgba = OpenCvUtils.bitmapToMat(bitmap)
             if (rgba.empty()) return@runCatching emptyResult()
-            val kernels = gaborKernels ?: buildGaborKernels().also { gaborKernels = it }
+            val kernels = getGaborKernels()
 
             val bgr = Mat()
             when (rgba.channels()) {
@@ -192,6 +213,7 @@ class CloseUpFingerDetector(
     }
 
     private fun detectRidges(gray: Mat, mask: Mat, kernels: List<Mat>): Double {
+        if (kernels.isEmpty()) return 0.0
         val grayNorm = Mat()
         Core.normalize(gray, grayNorm, 0.0, 255.0, Core.NORM_MINMAX)
 

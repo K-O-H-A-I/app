@@ -822,7 +822,7 @@ class TrackAViewModel(
         val missingGeometry = !detection.isDetected || weakDetection || geometryPoor
         val noHandButTexture = missingGeometry && fingertipTextureOk
         val fingertipModeRaw = (landmarkStaleDuration >= TrackACaptureConfig.fingertipModeDelayMs &&
-            closeUpEligible && fingertipTextureOk) ||
+            (closeUpEligible || fingertipTextureOk)) ||
             noHandButTexture
         if (fingertipModeRaw) {
             lastFingertipModeAt = frame.timestamp
@@ -844,6 +844,7 @@ class TrackAViewModel(
 
         val centerScoreFinal = when {
             centerScore > 0 -> centerScore
+            closeUpEligible -> 100
             fingertipMode -> 100
             else -> 0
         }
@@ -907,6 +908,33 @@ class TrackAViewModel(
         val livenessPass = if (!livenessEnabled) true else lastLivenessResult?.decision == "PASS"
         val combinedPass = readyState && livenessPass
 
+        val autoCaptureCloseEnough = when {
+            closeUp != null -> closeUpEligible
+            fingertipTextureOk -> {
+                frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
+                    frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin
+            }
+            else -> scaleRatio >= TrackACaptureConfig.autoCaptureScaleMin
+        }
+        val autoSteadyMin = if (closeUpEligible) {
+            steadyThreshold
+        } else {
+            TrackACaptureConfig.autoCaptureSteadyMin
+        }
+        val autoCaptureQuality = focusScore >= TrackACaptureConfig.autoCaptureFocusMin &&
+            steadyScore >= autoSteadyMin &&
+            lightScore >= lightThreshold
+        val autoCaptureEligible = autoCaptureCloseEnough && autoCaptureQuality
+
+        val autoCaptureProgress = if (combinedPass && autoCaptureEligible) {
+            val start = readySinceMs ?: frame.timestamp
+            val elapsed = (frame.timestamp - start).coerceAtLeast(0L)
+            val holdMs = TrackACaptureConfig.autoCaptureHoldMs.coerceAtLeast(1L)
+            ((elapsed.toDouble() / holdMs.toDouble()) * 100.0).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+
         if (!detectionPass) {
             result = result.copy(pass = false, topReason = "No finger detected")
             if (!detection.isDetected) {
@@ -929,15 +957,16 @@ class TrackAViewModel(
             steadyScore = steadyScore,
             fingerScalePx = fingerScalePx,
             focusRequested = focusRequested,
+            autoCaptureProgress = autoCaptureProgress,
             message = when {
                 combinedPass -> null
                 livenessEnabled && !livenessPass -> "Liveness failed"
-                fingertipMode -> "Close-up mode - hold still"
-                closeUp != null && closeUpEligible -> "Close-up mode - hold still"
+                fingertipMode -> "Hold still"
+                closeUp != null && closeUpEligible -> "Hold still"
                 closeUp != null && closeUp.skinDetected -> "Move closer to the camera"
-                !detectionFresh && fingertipTextureOk -> "Close-up mode - hold still"
+                !detectionFresh && fingertipTextureOk -> "Hold still"
                 !detectionFresh -> "Keep hand in view"
-                noHandButTexture -> "Close-up mode - hold still"
+                noHandButTexture -> "Hold still"
                 missingGeometry -> "Move fingers into the box"
                 scaleRatio > TrackACaptureConfig.scaleMax -> "Move back slightly"
                 scaleRatio < TrackACaptureConfig.scaleMin -> "Move closer to the camera"
@@ -951,27 +980,13 @@ class TrackAViewModel(
             },
         )
 
-        val autoCaptureCloseEnough = if (closeUp != null) {
-            closeUpEligible
-        } else if (fingertipMode) {
-            frame.edgeDensity >= TrackACaptureConfig.autoCaptureEdgeDensityMin &&
-                frame.textureVariance >= TrackACaptureConfig.autoCaptureTextureVarianceMin
-        } else {
-            scaleRatio >= TrackACaptureConfig.autoCaptureScaleMin
-        }
-        val autoCaptureQuality = focusScore >= TrackACaptureConfig.autoCaptureFocusMin &&
-            steadyScore >= TrackACaptureConfig.autoCaptureSteadyMin &&
-            lightScore >= lightThreshold
-        val autoCaptureEligible = autoCaptureCloseEnough && autoCaptureQuality
-
         val allowAutoCapture = (autoCaptureEnabled || TrackACaptureConfig.forceAutoCapture) && autoCaptureEligible
         if (allowAutoCapture &&
             readyState &&
             !captureInFlight &&
             frame.timestamp - lastCaptureMs > TrackACaptureConfig.autoCaptureCooldownMs
         ) {
-            val readyDuration = readySinceMs?.let { frame.timestamp - it } ?: 0L
-            val shouldTrigger = !wasReady || readyDuration >= 250L
+            val shouldTrigger = autoCaptureProgress >= 100
             if (shouldTrigger) {
                 autoCaptureToken += 1
                 _uiState.value = _uiState.value.copy(
@@ -1320,6 +1335,7 @@ data class TrackAUiState(
     val closeUpSkinRatio: Double = 0.0,
     val closeUpRidgeScore: Double = 0.0,
     val closeUpEdgeScore: Double = 0.0,
+    val autoCaptureProgress: Int = 0,
     val message: String? = null,
     val captureNotice: String? = null,
     val captureSource: CaptureSource? = null,

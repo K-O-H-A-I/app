@@ -12,7 +12,7 @@ object TrackACaptureConfig {
     const val coverageSoftRange = 0.60
     const val detectionStableMs = 60L
     const val readyStableMs = 140L
-    const val autoCaptureHoldMs = 100L
+    const val autoCaptureHoldMs = 40L
     const val readyWindowSize = 6
     const val readyEnterCount = 4
     const val readyExitCount = 2
@@ -30,10 +30,10 @@ object TrackACaptureConfig {
     const val torchAutoOffScore = 85
     const val torchDebounceMs = 900L
     const val torchMinOnMs = 3500L
-    const val autoCaptureCooldownMs = 1400L
+    const val autoCaptureCooldownMs = 900L
     const val autoCaptureScaleMin = 1.05f
-    const val autoCaptureFocusMin = 80
-    const val autoCaptureSteadyMin = 80
+    const val autoCaptureFocusMin = 75
+    const val autoCaptureSteadyMin = 75
     const val autoCaptureEdgeDensityMin = 0.20
     const val autoCaptureTextureVarianceMin = 0.10
     const val focusHoldMs = 180L

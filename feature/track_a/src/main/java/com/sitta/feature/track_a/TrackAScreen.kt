@@ -556,7 +556,7 @@ fun TrackAScreen(
                     message = uiState.captureNotice ?: uiState.message,
                 )
 
-                StabilityBar(score = steadyScore)
+                StabilityBar(score = uiState.autoCaptureProgress)
 
                 BottomCaptureBar(
                     captureEnabled = uiState.captureEnabled,
@@ -823,7 +823,7 @@ private fun StatusBanner(isReady: Boolean, message: String?) {
             .padding(bottom = 8.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
-        Text(text = text, color = color, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(text = text, color = color, fontSize = 20.sp, fontWeight = FontWeight.Medium)
     }
 }
 
