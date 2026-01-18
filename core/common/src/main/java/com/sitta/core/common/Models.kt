@@ -14,6 +14,7 @@ object ArtifactFilenames {
     const val RIDGES_500DPI = "ridges_500dpi.png"
     const val ENHANCED_TIFF = "enhanced.tiff"
     const val SKELETON = "skeleton.png"
+    const val SKELETON_TIFF = "skeleton.tiff"
     const val QUALITY = "quality.json"
     const val MATCH = "match.json"
     const val LIVENESS = "liveness.json"

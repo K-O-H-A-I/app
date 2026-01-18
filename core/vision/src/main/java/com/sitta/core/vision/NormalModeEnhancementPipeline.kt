@@ -65,12 +65,11 @@ class NormalModeEnhancementPipeline : EnhancementPipeline {
             lClahe.copyTo(lFinal, mask)
             steps.add(EnhancementStep("CLAHE", elapsedMs(t2)))
 
-            channels[0] = lFinal
-            val lab2 = Mat()
-            Core.merge(channels, lab2)
-            val outBgr = Mat()
-            Imgproc.cvtColor(lab2, outBgr, Imgproc.COLOR_Lab2BGR)
-            val outBitmap = OpenCvUtils.matToBitmap(outBgr, false)
+            val maskedGray = Mat.zeros(lFinal.size(), lFinal.type())
+            lFinal.copyTo(maskedGray, mask)
+            val outRgba = Mat()
+            Imgproc.cvtColor(maskedGray, outRgba, Imgproc.COLOR_GRAY2RGBA)
+            val outBitmap = OpenCvUtils.matToBitmap(outRgba, false)
             EnhancementResult(outBitmap, steps)
         }
     }

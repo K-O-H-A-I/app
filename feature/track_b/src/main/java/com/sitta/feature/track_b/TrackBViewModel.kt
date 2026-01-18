@@ -64,7 +64,12 @@ class TrackBViewModel(
                 ?.let { BitmapFactory.decodeFile(it.absolutePath) }
                 ?: maskFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
             val processingBitmap = BitmapFactory.decodeFile(roiFile.absolutePath)
-            _uiState.value = _uiState.value.copy(rawBitmap = rawBitmap, session = session, message = null)
+            val maskedRaw = if (rawBitmap != null && maskBitmap != null) {
+                applyMask(rawBitmap, maskBitmap)
+            } else {
+                rawBitmap
+            }
+            _uiState.value = _uiState.value.copy(rawBitmap = maskedRaw, session = session, message = null)
             processEnhancement(processingBitmap, maskBitmap, session, _uiState.value.sharpenStrength)
         }
     }
@@ -80,23 +85,27 @@ class TrackBViewModel(
     }
 
     fun exportEnhanced(format: ExportFormat) {
-        val enhanced = _uiState.value.enhancedBitmap ?: return
+        val skeleton = _uiState.value.skeletonBitmap
+        if (skeleton == null) {
+            _uiState.value = _uiState.value.copy(message = "Skeleton not available to export")
+            return
+        }
         val session = _uiState.value.session ?: return
         viewModelScope.launch(Dispatchers.IO) {
             val message = when (format) {
                 ExportFormat.PNG -> {
-                    sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, enhanced)
-                    val saved = saveToGallery(enhanced, "image/png", "png")
-                    if (saved != null) "Saved PNG to session and gallery" else "Saved PNG to session"
+                    sessionRepository.saveBitmap(session, ArtifactFilenames.SKELETON, skeleton)
+                    val saved = saveToGallery(skeleton, "image/png", "png")
+                    if (saved != null) "Saved PNG skeleton to session and gallery" else "Saved PNG skeleton to session"
                 }
                 ExportFormat.TIFF -> {
-                    val tiffSaved = saveTiffToSession(session, ArtifactFilenames.ENHANCED_TIFF, enhanced)
+                    val tiffSaved = saveTiffToSession(session, ArtifactFilenames.SKELETON_TIFF, skeleton)
                     val saved = if (tiffSaved != null) {
                         saveFileToGallery(tiffSaved, "image/tiff", "tiff")
                     } else {
                         null
                     }
-                    if (saved != null) "Saved TIFF to session and gallery" else "Saved TIFF to session"
+                    if (saved != null) "Saved TIFF skeleton to session and gallery" else "Saved TIFF skeleton to session"
                 }
             }
             _uiState.value = _uiState.value.copy(message = message)
@@ -116,7 +125,7 @@ class TrackBViewModel(
             val skeletonBitmap = if (ridgeDensity in 0.15..0.6) {
                 skeletonizer.skeletonize(ridgeBitmap)
             } else {
-                null
+                skeletonizer.skeletonize(ridgeBitmap)
             }
             val t0 = System.nanoTime()
             val quality = qualityAnalyzer.analyze(
@@ -124,11 +133,9 @@ class TrackBViewModel(
                 android.graphics.Rect(0, 0, result.bitmap.width, result.bitmap.height),
             )
             val qualityMs = ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1)
-            val message = if (skeletonBitmap == null) {
-                "Ridge quality too low for skeleton"
-            } else {
-                null
-            }
+            val message = if (ridgeDensity !in 0.15..0.6) {
+                "Ridge quality too low for skeleton (exporting anyway)"
+            } else null
             _uiState.value = _uiState.value.copy(
                 enhancedBitmap = result.bitmap,
                 ridgeBitmap = ridgeBitmap,
@@ -231,6 +238,22 @@ class TrackBViewModel(
 
     fun clearMessage() {
         _uiState.value = _uiState.value.copy(message = null)
+    }
+
+    private fun applyMask(source: Bitmap, mask: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        canvas.drawBitmap(source, 0f, 0f, paint)
+        paint.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+        val scaledMask = if (mask.width != source.width || mask.height != source.height) {
+            Bitmap.createScaledBitmap(mask, source.width, source.height, false)
+        } else {
+            mask
+        }
+        canvas.drawBitmap(scaledMask, 0f, 0f, paint)
+        paint.xfermode = null
+        return out
     }
 }
 

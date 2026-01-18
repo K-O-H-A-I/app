@@ -204,7 +204,7 @@ fun TrackBScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14B8A6)),
                 shape = RoundedCornerShape(20.dp),
             ) {
-                Text(text = "Save & Export", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(text = "Save in ISO Format", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
