@@ -86,9 +86,9 @@ import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.vision.FrameCrop
 import com.sitta.core.vision.FingerDetector
 import com.sitta.core.vision.FingerLandmark
-import com.sitta.core.vision.FingerMasker
 import com.sitta.core.vision.FingerSceneAnalyzer
 import com.sitta.core.vision.CloseUpFingerDetector
+import com.sitta.core.vision.NormalModeSegmentation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -108,7 +108,7 @@ class TrackAViewModelFactory(
     private val livenessDetector: LivenessDetector,
     private val fingerDetector: FingerDetector,
     private val fingerSceneAnalyzer: FingerSceneAnalyzer,
-    private val fingerMasker: FingerMasker,
+    private val segmentation: NormalModeSegmentation,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TrackAViewModel::class.java)) {
@@ -122,7 +122,7 @@ class TrackAViewModelFactory(
                 livenessDetector,
                 fingerDetector,
                 fingerSceneAnalyzer,
-                fingerMasker,
+                segmentation,
             ) as T
         }
         error("Unknown ViewModel class")
@@ -139,7 +139,7 @@ fun TrackAScreen(
     livenessDetector: LivenessDetector,
     fingerDetector: FingerDetector,
     fingerSceneAnalyzer: FingerSceneAnalyzer,
-    fingerMasker: FingerMasker,
+    segmentation: NormalModeSegmentation,
     onCaptureComplete: () -> Unit,
     onBack: () -> Unit,
     enableCamera: Boolean = true,
@@ -154,7 +154,7 @@ fun TrackAScreen(
             livenessDetector,
             fingerDetector,
             fingerSceneAnalyzer,
-            fingerMasker,
+            segmentation,
         ),
     )
     val uiState by viewModel.uiState.collectAsState()

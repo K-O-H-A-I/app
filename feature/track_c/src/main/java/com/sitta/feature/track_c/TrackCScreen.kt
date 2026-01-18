@@ -305,7 +305,14 @@ fun TrackCScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 uiState.results.forEach { result ->
-                    ResultRow(id = result.candidateId, score = result.score, decision = result.decision)
+                    ResultRow(
+                        id = result.candidateId,
+                        score = result.score,
+                        decision = result.decision,
+                        confidence = result.confidence,
+                        featureScores = result.featureScores,
+                        timeMs = result.timeMs,
+                    )
                 }
             }
         } else if (uiState.matchStatus != null) {
@@ -465,7 +472,14 @@ private fun MatchStatusPill(text: String, isMatch: Boolean) {
 }
 
 @Composable
-private fun ResultRow(id: String, score: Double, decision: String) {
+private fun ResultRow(
+    id: String,
+    score: Double,
+    decision: String,
+    confidence: Double?,
+    featureScores: Map<String, Double>,
+    timeMs: Long?,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -474,8 +488,29 @@ private fun ResultRow(id: String, score: Double, decision: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = id, color = Color.White, fontSize = 13.sp)
-        Text(text = String.format("%.1f", score), color = Color(0xFF93A3B5), fontSize = 13.sp)
+        Column {
+            Text(text = id, color = Color.White, fontSize = 13.sp)
+            val detail = buildString {
+                append(String.format("%.1f", score))
+                if (confidence != null) {
+                    append(" • c=")
+                    append(String.format("%.2f", confidence))
+                }
+                if (timeMs != null) {
+                    append(" • ")
+                    append(timeMs)
+                    append("ms")
+                }
+            }
+            Text(text = detail, color = Color(0xFF93A3B5), fontSize = 12.sp)
+            if (featureScores.isNotEmpty()) {
+                val summary = listOf("orientation", "gabor", "frequency", "texture", "pixel").joinToString(" ") { key ->
+                    val value = featureScores[key] ?: 0.0
+                    "${key.take(3)}=${String.format("%.2f", value)}"
+                }
+                Text(text = summary, color = Color(0xFF6B7280), fontSize = 10.sp)
+            }
+        }
         Text(
             text = decision,
             color = if (decision == "MATCH") Color(0xFF34D399) else Color(0xFFF87171),

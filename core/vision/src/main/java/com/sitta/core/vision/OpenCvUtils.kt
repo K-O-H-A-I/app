@@ -10,7 +10,9 @@ import org.opencv.imgcodecs.Imgcodecs
 import java.io.File
 
 object OpenCvUtils {
-    private val loaded = lazy { OpenCVLoader.initDebug() }
+    private val loaded = lazy {
+        runCatching { OpenCVLoader.initDebug() }.getOrDefault(false)
+    }
 
     private fun ensureLoaded() {
         loaded.value
@@ -25,6 +27,14 @@ object OpenCvUtils {
         val mat = Mat()
         Utils.bitmapToMat(bitmap, mat)
         return mat
+    }
+
+    fun matToBitmap(mat: Mat, gray: Boolean): Bitmap {
+        ensureLoaded()
+        val config = if (gray) Bitmap.Config.ARGB_8888 else Bitmap.Config.ARGB_8888
+        val bitmap = Bitmap.createBitmap(mat.cols(), mat.rows(), config)
+        Utils.matToBitmap(mat, bitmap)
+        return bitmap
     }
 
     fun cropMat(mat: Mat, roi: Rect): Mat {

@@ -60,7 +60,7 @@ class TrackBViewModelFactory(
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
     private val qualityAnalyzer: QualityAnalyzer,
-    private val ridgeExtractor: com.sitta.core.vision.FingerRidgeExtractor,
+    private val ridgeExtractor: com.sitta.core.vision.NormalModeRidgeExtractor,
     private val skeletonizer: com.sitta.core.vision.FingerSkeletonizer,
     private val appContext: android.content.Context,
 ) : ViewModelProvider.Factory {
@@ -87,7 +87,7 @@ fun TrackBScreen(
     authManager: AuthManager,
     enhancementPipeline: EnhancementPipeline,
     qualityAnalyzer: QualityAnalyzer,
-    ridgeExtractor: com.sitta.core.vision.FingerRidgeExtractor,
+    ridgeExtractor: com.sitta.core.vision.NormalModeRidgeExtractor,
     skeletonizer: com.sitta.core.vision.FingerSkeletonizer,
     onBack: () -> Unit,
 ) {

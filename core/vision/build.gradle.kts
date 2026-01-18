@@ -36,4 +36,7 @@ dependencies {
     implementation(libs.mediapipe.tasks.vision)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    androidTestImplementation(libs.androidx.test.ext)
+    androidTestImplementation(libs.espresso.core)
 }

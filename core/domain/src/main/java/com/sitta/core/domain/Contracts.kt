@@ -54,11 +54,15 @@ data class MatchCandidateResult(
     val candidateId: String,
     val score: Double,
     val decision: String,
+    val confidence: Double? = null,
+    val featureScores: Map<String, Double> = emptyMap(),
+    val timeMs: Long? = null,
 )
 
 data class MatchResult(
     val thresholdUsed: Double,
     val candidates: List<MatchCandidateResult>,
+    val timeMs: Long? = null,
 )
 
 interface Matcher {

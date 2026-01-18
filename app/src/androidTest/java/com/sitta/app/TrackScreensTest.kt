@@ -23,7 +23,7 @@ import com.sitta.core.domain.Matcher
 import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.domain.QualityResult
 import com.sitta.core.vision.FingerDetector
-import com.sitta.core.vision.FingerMasker
+import com.sitta.core.vision.NormalModeSegmentation
 import com.sitta.core.vision.FingerSceneAnalyzer
 import com.sitta.feature.track_a.TrackAScreen
 import com.sitta.feature.track_b.TrackBScreen
@@ -61,7 +61,7 @@ class TrackScreensTest {
         }
         val fingerDetector = FingerDetector(context)
         val fingerSceneAnalyzer = FingerSceneAnalyzer()
-        val fingerMasker = FingerMasker()
+        val segmentation = NormalModeSegmentation()
 
         composeRule.setContent {
             TrackAScreen(
@@ -72,7 +72,7 @@ class TrackScreensTest {
                 livenessDetector = livenessDetector,
                 fingerDetector = fingerDetector,
                 fingerSceneAnalyzer = fingerSceneAnalyzer,
-                fingerMasker = fingerMasker,
+                segmentation = segmentation,
                 onCaptureComplete = {},
                 onBack = {},
                 enableCamera = false,

@@ -46,7 +46,6 @@ import com.sitta.core.data.AuthManager
 import com.sitta.core.data.SettingsRepository
 import com.sitta.core.data.SessionRepository
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 
 @Composable
@@ -66,7 +65,6 @@ fun TrackSelectorScreen(
     val background = if (isDark) Color(0xFF121212) else Color(0xFFF7F7F7)
     val surface = if (isDark) Color(0xFF1E1E1E) else Color.White
     val sessions = sessionRepository.listSessions(activeTenant.id)
-    val scansToday = countScansToday(sessionRepository, sessions)
     val recentActivity = buildRecentActivity(sessionRepository, sessions)
 
     Column(
@@ -145,16 +143,6 @@ fun TrackSelectorScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280),
                     )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    if (scansToday > 0) {
-                        Text(
-                            text = scansToday.toString(),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = if (isDark) Color.White else Color(0xFF111827),
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
                 }
             }
         }
@@ -330,16 +318,6 @@ private fun ActivityRow(title: String, time: String) {
             Text(text = title, style = MaterialTheme.typography.bodyMedium)
             Text(text = time, style = MaterialTheme.typography.bodySmall, color = Color(0xFF6B7280))
         }
-    }
-}
-
-private fun countScansToday(sessionRepository: SessionRepository, sessions: List<SessionInfo>): Int {
-    val zone = ZoneId.systemDefault()
-    val today = LocalDate.now(zone)
-    return sessions.count { session ->
-        val date = Instant.ofEpochMilli(session.timestamp).atZone(zone).toLocalDate()
-        if (date != today) return@count false
-        sessionRepository.sessionArtifactPath(session, ArtifactFilenames.QUALITY).exists()
     }
 }
 

@@ -42,7 +42,7 @@ fun SittaApp(container: AppContainer) {
                 livenessDetector = container.livenessDetector,
                 fingerDetector = container.fingerDetector,
                 fingerSceneAnalyzer = container.fingerSceneAnalyzer,
-                fingerMasker = container.fingerMasker,
+                segmentation = container.segmentation,
                 onCaptureComplete = {
                     if (origin == "match") {
                         navController.popBackStack("trackC", inclusive = false)

@@ -24,7 +24,8 @@ import com.sitta.core.domain.QualityStabilityGate
 import com.sitta.core.vision.FingerDetectionResult
 import com.sitta.core.vision.LandmarkType
 import com.sitta.core.vision.FingerDetector
-import com.sitta.core.vision.FingerMasker
+import com.sitta.core.vision.NormalModeSegmentation
+import com.sitta.core.vision.IsoPngWriter
 import com.sitta.core.vision.FingerSceneAnalyzer
 import com.sitta.core.vision.CloseUpFingerResult
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +48,7 @@ class TrackAViewModel(
     private val livenessDetector: LivenessDetector,
     private val fingerDetector: FingerDetector,
     private val fingerSceneAnalyzer: FingerSceneAnalyzer,
-    private val fingerMasker: FingerMasker,
+    private val segmentation: NormalModeSegmentation,
 ) : ViewModel() {
     private val detectionGate = QualityStabilityGate(TrackACaptureConfig.detectionStableMs)
     private val autoGate = QualityStabilityGate(TrackACaptureConfig.autoCaptureHoldMs)
@@ -388,21 +389,15 @@ class TrackAViewModel(
                 val fullRawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, bitmap)
                 if (fullRawResult is AppResult.Error) return@launch
                 _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
-                val roiBitmap = Bitmap.createBitmap(
-                    bitmap,
-                    effectiveRoi.left,
-                    effectiveRoi.top,
-                    effectiveRoi.width(),
-                    effectiveRoi.height(),
-                )
-                val stillDetectionFull = fingerDetector.detectFingerStill(bitmap)
-                val stillDetection = mapDetectionToRoi(stillDetectionFull, effectiveRoi, bitmap.width, bitmap.height)
-                val segmentation = fingerMasker.segmentFingertips(roiBitmap, stillDetection)
-                val segmentedBitmap = segmentation?.masked ?: roiBitmap
+                val segResult = segmentation.segment(bitmap)
+                val maskBitmap = segResult?.mask ?: fallbackMask(bitmap)
+                val segmentedBitmap = segResult?.segmented ?: bitmap
+                val roiBitmap = segResult?.roi ?: segmentedBitmap
                 sessionRepository.saveBitmap(session, ArtifactFilenames.SEGMENTED, segmentedBitmap)
-                val croppedRoi = fingerMasker.cropToFingertips(segmentedBitmap, roiBitmap)
-                val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, croppedRoi)
+                sessionRepository.saveBitmap(session, ArtifactFilenames.SEGMENTATION_MASK, maskBitmap)
+                val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, roiBitmap)
                 if (roiResult is AppResult.Error) return@launch
+                saveIsoVariants(session, segmentedBitmap)
 
                 val perf = perfTracker.buildAndReset("manual_capture")
                 val reportMetrics = if (captureMode == "fingertip_only") {
@@ -473,21 +468,15 @@ class TrackAViewModel(
                 val fullRawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, frame)
                 if (fullRawResult is AppResult.Error) return@launch
                 _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
-                val roiBitmap = Bitmap.createBitmap(
-                    frame,
-                    roi.left,
-                    roi.top,
-                    roi.width(),
-                    roi.height(),
-                )
-                val stillDetectionFull = fingerDetector.detectFingerStill(frame)
-                val stillDetection = mapDetectionToRoi(stillDetectionFull, roi, frame.width, frame.height)
-                val segmentation = fingerMasker.segmentFingertips(roiBitmap, stillDetection)
-                val segmentedBitmap = segmentation?.masked ?: roiBitmap
+                val segResult = segmentation.segment(frame)
+                val maskBitmap = segResult?.mask ?: fallbackMask(frame)
+                val segmentedBitmap = segResult?.segmented ?: frame
+                val roiBitmap = segResult?.roi ?: segmentedBitmap
                 sessionRepository.saveBitmap(session, ArtifactFilenames.SEGMENTED, segmentedBitmap)
-                val croppedRoi = fingerMasker.cropToFingertips(segmentedBitmap, roiBitmap)
-                val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, croppedRoi)
+                sessionRepository.saveBitmap(session, ArtifactFilenames.SEGMENTATION_MASK, maskBitmap)
+                val roiResult = sessionRepository.saveBitmap(session, ArtifactFilenames.ROI, roiBitmap)
                 if (roiResult is AppResult.Error) return@launch
+                saveIsoVariants(session, segmentedBitmap)
 
                 val perf = perfTracker.buildAndReset("capture_internal")
                 val reportMetrics = if (captureMode == "fingertip_only") {
@@ -1327,6 +1316,26 @@ class TrackAViewModel(
         window.addLast(value)
         while (window.size > maxSize) {
             window.removeFirst()
+        }
+    }
+
+    private fun fallbackMask(bitmap: Bitmap): Bitmap {
+        val mask = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(mask)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        return mask
+    }
+
+    private fun saveIsoVariants(session: com.sitta.core.common.SessionInfo, segmented: Bitmap) {
+        runCatching {
+            val dir = sessionRepository.sessionDir(session)
+            if (!dir.exists()) dir.mkdirs()
+            val iso = IsoPngWriter.resampleToIso(segmented, 500, 72)
+            IsoPngWriter.savePngWithDpi(
+                iso,
+                java.io.File(dir, com.sitta.core.common.ArtifactFilenames.SEGMENTED_500DPI),
+                500,
+            )
         }
     }
 

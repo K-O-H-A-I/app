@@ -16,8 +16,9 @@ import com.sitta.core.data.SessionRepository
 import com.sitta.core.domain.EnhancementPipeline
 import com.sitta.core.domain.QualityAnalyzer
 import com.sitta.core.domain.QualityResult
-import com.sitta.core.vision.FingerRidgeExtractor
+import com.sitta.core.vision.NormalModeRidgeExtractor
 import com.sitta.core.vision.FingerSkeletonizer
+import com.sitta.core.vision.IsoPngWriter
 import com.sitta.core.vision.OpenCvUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +33,7 @@ class TrackBViewModel(
     private val authManager: AuthManager,
     private val enhancementPipeline: EnhancementPipeline,
     private val qualityAnalyzer: QualityAnalyzer,
-    private val ridgeExtractor: FingerRidgeExtractor,
+    private val ridgeExtractor: NormalModeRidgeExtractor,
     private val skeletonizer: FingerSkeletonizer,
     private val appContext: android.content.Context,
 ) : ViewModel() {
@@ -47,8 +48,10 @@ class TrackBViewModel(
                 _uiState.value = _uiState.value.copy(message = "No session found")
                 return@launch
             }
-            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
+            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
+                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
             val roiFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
+                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
                 ?: rawFile
             val maskFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
             if (roiFile == null) {
@@ -57,7 +60,9 @@ class TrackBViewModel(
             }
             val rawBitmap = rawFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
                 ?: BitmapFactory.decodeFile(roiFile.absolutePath)
-            val maskBitmap = maskFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            val maskBitmap = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTATION_MASK)
+                ?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                ?: maskFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
             val processingBitmap = BitmapFactory.decodeFile(roiFile.absolutePath)
             _uiState.value = _uiState.value.copy(rawBitmap = rawBitmap, session = session, message = null)
             processEnhancement(processingBitmap, maskBitmap, session, _uiState.value.sharpenStrength)
@@ -101,8 +106,12 @@ class TrackBViewModel(
     private suspend fun processEnhancement(bitmap: Bitmap, maskBitmap: Bitmap?, session: SessionInfo, strength: Float) {
         runCatching {
             val result = enhancementPipeline.enhance(bitmap, strength)
-            val ridgeInput = maskBitmap ?: result.bitmap
-            val ridgeBitmap = ridgeExtractor.extractRidge(ridgeInput)
+            val ridgeResult = ridgeExtractor.extractRidges(result.bitmap, maskBitmap)
+            if (ridgeResult == null) {
+                _uiState.value = _uiState.value.copy(message = "Ridge extraction failed")
+                return
+            }
+            val ridgeBitmap = ridgeResult.ridgeBitmap
             val ridgeDensity = computeRidgeDensity(ridgeBitmap)
             val skeletonBitmap = if (ridgeDensity in 0.15..0.6) {
                 skeletonizer.skeletonize(ridgeBitmap)
@@ -130,9 +139,11 @@ class TrackBViewModel(
                 message = message,
             )
             sessionRepository.saveBitmap(session, ArtifactFilenames.ENHANCED, result.bitmap)
+            sessionRepository.saveBitmap(session, ArtifactFilenames.RIDGES, ridgeBitmap)
             if (skeletonBitmap != null) {
                 sessionRepository.saveBitmap(session, ArtifactFilenames.SKELETON, skeletonBitmap)
             }
+            saveIsoArtifacts(session, result.bitmap, ridgeBitmap)
         }.onFailure {
             _uiState.value = _uiState.value.copy(message = "Enhancement failed. Please try again.")
         }
@@ -205,6 +216,17 @@ class TrackBViewModel(
             val file = File(dir, filename)
             if (!OpenCvUtils.saveBitmapAsTiff(bitmap, file)) null else file
         }.getOrNull()
+    }
+
+    private fun saveIsoArtifacts(session: SessionInfo, enhanced: Bitmap, ridges: Bitmap) {
+        runCatching {
+            val dir = sessionRepository.sessionDir(session)
+            if (!dir.exists()) dir.mkdirs()
+            val enhancedIso = IsoPngWriter.resampleToIso(enhanced, 500, 72)
+            IsoPngWriter.savePngWithDpi(enhancedIso, File(dir, ArtifactFilenames.ENHANCED_500DPI), 500)
+            val ridgesIso = IsoPngWriter.resampleToIso(ridges, 500, 72)
+            IsoPngWriter.savePngWithDpi(ridgesIso, File(dir, ArtifactFilenames.RIDGES_500DPI), 500)
+        }
     }
 
     fun clearMessage() {

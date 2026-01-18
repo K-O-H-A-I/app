@@ -68,7 +68,9 @@ class TrackCViewModel(
             val tenantId = authManager.activeTenant.value.id
             val session = sessionRepository.loadLastSession(tenantId)
                 ?: return@launch
-            val probeFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
+            val probeFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RIDGES)
+                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
+                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
                 ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
                 ?: return@launch
             val bitmap = BitmapFactory.decodeFile(probeFile.absolutePath)
@@ -119,7 +121,7 @@ class TrackCViewModel(
                 matchConfirmed = confirmed,
                 matchStatus = if (confirmed) "Match Confirmed" else "No Match",
             )
-            saveMatchReport(result.candidates, threshold, probeFilename)
+            saveMatchReport(result.candidates, threshold, probeFilename, result.timeMs)
         }
     }
 
@@ -127,6 +129,7 @@ class TrackCViewModel(
         results: List<MatchCandidateResult>,
         threshold: Double,
         probeFilename: String?,
+        timeMs: Long?,
     ) {
         val tenantId = authManager.activeTenant.value.id
         val session = sessionRepository.loadLastSession(tenantId)
@@ -139,8 +142,16 @@ class TrackCViewModel(
             probeFilename = probeFilename ?: "probe.png",
             thresholdUsed = threshold,
             candidates = results.map {
-                MatchCandidate(candidateId = it.candidateId, score = it.score, decision = it.decision)
+                MatchCandidate(
+                    candidateId = it.candidateId,
+                    score = it.score,
+                    decision = it.decision,
+                    confidence = it.confidence,
+                    featureScores = it.featureScores,
+                    timeMs = it.timeMs,
+                )
             },
+            timeMs = timeMs,
         )
         sessionRepository.saveJson(session, com.sitta.core.common.ArtifactFilenames.MATCH, report)
     }

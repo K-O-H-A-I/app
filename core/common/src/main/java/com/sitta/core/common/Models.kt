@@ -6,7 +6,12 @@ object ArtifactFilenames {
     const val RAW = "raw.png"
     const val ROI = "roi.png"
     const val SEGMENTED = "segmented.png"
+    const val SEGMENTATION_MASK = "mask.png"
     const val ENHANCED = "enhanced.png"
+    const val RIDGES = "ridges.png"
+    const val SEGMENTED_500DPI = "segmented_500dpi.png"
+    const val ENHANCED_500DPI = "enhanced_500dpi.png"
+    const val RIDGES_500DPI = "ridges_500dpi.png"
     const val ENHANCED_TIFF = "enhanced.tiff"
     const val SKELETON = "skeleton.png"
     const val QUALITY = "quality.json"
@@ -74,6 +79,9 @@ data class MatchCandidate(
     @SerializedName("candidate_id") val candidateId: String,
     val score: Double,
     val decision: String,
+    @SerializedName("confidence") val confidence: Double? = null,
+    @SerializedName("feature_scores") val featureScores: Map<String, Double> = emptyMap(),
+    @SerializedName("time_ms") val timeMs: Long? = null,
 )
 
 data class MatchReport(
@@ -81,6 +89,7 @@ data class MatchReport(
     @SerializedName("probe_filename") val probeFilename: String,
     @SerializedName("threshold_used") val thresholdUsed: Double,
     val candidates: List<MatchCandidate>,
+    @SerializedName("time_ms") val timeMs: Long? = null,
 )
 
 data class LivenessReport(
