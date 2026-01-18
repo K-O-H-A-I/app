@@ -289,7 +289,7 @@ private fun ImagePane(title: String, bitmap: android.graphics.Bitmap?, modifier:
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = title,
                 modifier = Modifier.matchParentSize(),
-                contentScale = ContentScale.Crop,
+                contentScale = ContentScale.Fit,
             )
         }
         Box(

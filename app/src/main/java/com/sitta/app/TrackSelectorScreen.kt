@@ -147,12 +147,14 @@ fun TrackSelectorScreen(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = scansToday.toString(),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = if (isDark) Color.White else Color(0xFF111827),
-                        fontWeight = FontWeight.Bold,
-                    )
+                    if (scansToday > 0) {
+                        Text(
+                            text = scansToday.toString(),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = if (isDark) Color.White else Color(0xFF111827),
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
         }

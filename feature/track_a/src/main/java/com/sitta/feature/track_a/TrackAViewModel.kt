@@ -387,6 +387,7 @@ class TrackAViewModel(
 
                 val fullRawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, bitmap)
                 if (fullRawResult is AppResult.Error) return@launch
+                _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
                 val roiBitmap = Bitmap.createBitmap(
                     bitmap,
                     effectiveRoi.left,
@@ -471,6 +472,7 @@ class TrackAViewModel(
                 }
                 val fullRawResult = sessionRepository.saveBitmap(session, ArtifactFilenames.RAW, frame)
                 if (fullRawResult is AppResult.Error) return@launch
+                _uiState.value = _uiState.value.copy(lastSessionId = session.sessionId)
                 val roiBitmap = Bitmap.createBitmap(
                     frame,
                     roi.left,
@@ -940,7 +942,9 @@ class TrackAViewModel(
             lightScore >= lightThreshold
         val autoCaptureEligible = autoCaptureCloseEnough && autoCaptureQuality
 
-        val autoCaptureProgress = if (combinedPass && autoCaptureEligible) {
+        val allowAutoCapture =
+            (autoCaptureEnabled || TrackACaptureConfig.forceAutoCapture) && autoCaptureEligible
+        val autoCaptureProgress = if (combinedPass && allowAutoCapture) {
             val start = readySinceMs ?: frame.timestamp
             val elapsed = (frame.timestamp - start).coerceAtLeast(0L)
             val holdMs = TrackACaptureConfig.autoCaptureHoldMs.coerceAtLeast(1L)
@@ -994,7 +998,6 @@ class TrackAViewModel(
             },
         )
 
-        val allowAutoCapture = (autoCaptureEnabled || TrackACaptureConfig.forceAutoCapture) && autoCaptureEligible
         if (allowAutoCapture &&
             readyState &&
             !captureInFlight &&

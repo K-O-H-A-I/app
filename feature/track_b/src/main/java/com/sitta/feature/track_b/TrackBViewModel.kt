@@ -47,17 +47,20 @@ class TrackBViewModel(
                 _uiState.value = _uiState.value.copy(message = "No session found")
                 return@launch
             }
+            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
             val roiFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
-                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
+                ?: rawFile
             val maskFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
             if (roiFile == null) {
                 _uiState.value = _uiState.value.copy(message = "Capture not found")
                 return@launch
             }
-            val rawBitmap = BitmapFactory.decodeFile(roiFile.absolutePath)
+            val rawBitmap = rawFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                ?: BitmapFactory.decodeFile(roiFile.absolutePath)
             val maskBitmap = maskFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            val processingBitmap = BitmapFactory.decodeFile(roiFile.absolutePath)
             _uiState.value = _uiState.value.copy(rawBitmap = rawBitmap, session = session, message = null)
-            processEnhancement(rawBitmap, maskBitmap, session, _uiState.value.sharpenStrength)
+            processEnhancement(processingBitmap, maskBitmap, session, _uiState.value.sharpenStrength)
         }
     }
 
