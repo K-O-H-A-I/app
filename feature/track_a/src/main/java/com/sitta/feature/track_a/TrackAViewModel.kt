@@ -313,6 +313,14 @@ class TrackAViewModel(
         }
     }
 
+    fun onAutoCaptureCancelled() {
+        captureInFlight = false
+        _uiState.value = _uiState.value.copy(
+            autoCaptureRequested = false,
+            captureSource = CaptureSource.AUTO,
+        )
+    }
+
     fun startAutoCapture(): Boolean {
         if (captureInFlight) return false
         captureInFlight = true

@@ -429,8 +429,8 @@ fun TrackAScreen(
         )
     }
 
-    LaunchedEffect(uiState.autoCaptureRequested, uiState.autoCaptureToken, cameraCaptureState.value) {
-        if (!uiState.autoCaptureRequested && uiState.autoCaptureToken == 0L) return@LaunchedEffect
+    LaunchedEffect(uiState.autoCaptureToken, cameraCaptureState.value) {
+        if (uiState.autoCaptureToken == 0L) return@LaunchedEffect
         val imageCapture = cameraCaptureState.value ?: return@LaunchedEffect
         if (captureBurstInFlight) return@LaunchedEffect
         if (!viewModel.startAutoCapture()) return@LaunchedEffect
@@ -462,6 +462,8 @@ fun TrackAScreen(
             } else {
                 viewModel.capture()
             }
+        } catch (t: kotlinx.coroutines.CancellationException) {
+            viewModel.onAutoCaptureCancelled()
         } catch (t: Throwable) {
             Log.e("TrackA", "Auto capture failed", t)
             viewModel.capture()
