@@ -40,7 +40,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.FlashOff
 import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material3.AssistChip
@@ -459,14 +458,16 @@ fun TrackAScreen(
             }
             if (best != null) {
                 viewModel.captureFromBitmap(best, CaptureSource.AUTO)
-            } else {
-                viewModel.capture()
+            } else if (!viewModel.captureFromLatestFrameAuto()) {
+                viewModel.onAutoCaptureFailure()
             }
         } catch (t: kotlinx.coroutines.CancellationException) {
             viewModel.onAutoCaptureCancelled()
         } catch (t: Throwable) {
             Log.e("TrackA", "Auto capture failed", t)
-            viewModel.capture()
+            if (!viewModel.captureFromLatestFrameAuto()) {
+                viewModel.onAutoCaptureFailure()
+            }
         } finally {
             captureBurstInFlight = false
         }
@@ -600,7 +601,6 @@ fun TrackAScreen(
                         cameraControlState.value?.enableTorch(torchEnabled)
                     },
                     torchEnabled = torchEnabled,
-                    onSwitchCamera = { useFrontCamera = !useFrontCamera },
                 )
             }
         }
@@ -825,7 +825,7 @@ private fun StatusBanner(isReady: Boolean, message: String?) {
             .padding(bottom = 8.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
-        Text(text = text, color = color, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+        Text(text = text, color = color, fontSize = 22.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -846,8 +846,8 @@ private fun StabilityBar(score: Int) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(text = "Hold Still", color = Color(0xFFCBD5F5), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = "${clamped}%", color = Color(0xFFCBD5F5), fontSize = 11.sp)
+            Text(text = "Hold Still", color = Color(0xFFCBD5F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "${clamped}%", color = Color(0xFFCBD5F5), fontSize = 13.sp)
         }
         Spacer(modifier = Modifier.height(6.dp))
         Box(
@@ -1273,7 +1273,6 @@ private fun BottomCaptureBar(
     onCapture: () -> Unit,
     onFlashToggle: () -> Unit,
     torchEnabled: Boolean,
-    onSwitchCamera: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -1289,12 +1288,6 @@ private fun BottomCaptureBar(
         )
         Spacer(modifier = Modifier.width(24.dp))
         CaptureButton(enabled = captureEnabled, onClick = onCapture)
-        Spacer(modifier = Modifier.width(24.dp))
-        SideActionButton(
-            icon = Icons.Outlined.FlipCameraAndroid,
-            contentDescription = "Switch camera",
-            onClick = onSwitchCamera,
-        )
     }
 }
 

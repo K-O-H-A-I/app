@@ -153,11 +153,6 @@ fun TrackSelectorScreen(
                         color = if (isDark) Color.White else Color(0xFF111827),
                         fontWeight = FontWeight.Bold,
                     )
-                    Text(
-                        text = "Scans Today",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isDark) Color(0xFF9CA3AF) else Color(0xFF6B7280),
-                    )
                 }
             }
         }

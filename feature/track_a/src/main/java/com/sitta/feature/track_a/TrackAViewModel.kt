@@ -333,6 +333,12 @@ class TrackAViewModel(
         return true
     }
 
+    fun captureFromLatestFrameAuto(): Boolean {
+        val frame = latestFrame ?: return false
+        captureFromBitmap(frame, CaptureSource.AUTO)
+        return true
+    }
+
     fun captureFromBitmap(bitmap: Bitmap, source: CaptureSource = CaptureSource.MANUAL) {
         if (captureInFlight && source != CaptureSource.AUTO) return
         if (!captureInFlight) {
