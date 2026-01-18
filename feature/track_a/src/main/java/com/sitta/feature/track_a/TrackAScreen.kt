@@ -45,6 +45,7 @@ import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -473,7 +474,7 @@ fun TrackAScreen(
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
@@ -484,9 +485,9 @@ fun TrackAScreen(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0f to Color(0xFF0B0D11).copy(alpha = 0.35f),
+                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.35f),
                             0.45f to Color.Transparent,
-                            1f to Color(0xFF0B0D11).copy(alpha = 0.55f),
+                            1f to MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
                         ),
                     ),
             )
@@ -523,7 +524,7 @@ fun TrackAScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF0B0F14).copy(alpha = 0.9f), RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), RoundedCornerShape(18.dp))
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -537,7 +538,7 @@ fun TrackAScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "Cumulative ${quality?.score0To100 ?: 0}",
-                            color = Color(0xFFB8C0CC),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                         )
                         if (uiState.debugOverlayEnabled) {
@@ -547,7 +548,7 @@ fun TrackAScreen(
                                     "skin ${"%.2f".format(uiState.closeUpSkinRatio)} " +
                                     "ridge ${"%.2f".format(uiState.closeUpRidgeScore)} " +
                                     "edge ${"%.2f".format(uiState.closeUpEdgeScore)}",
-                                color = Color(0xFF93A3B5),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
                             )
                         }
@@ -618,7 +619,7 @@ private fun TopBar(onBack: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "Biometric Capture",
-                color = Color(0xFFB7BDC7),
+                color = MaterialTheme.colorScheme.onBackground,
                 fontSize = 11.sp,
                 letterSpacing = 1.2.sp,
             )
@@ -636,16 +637,18 @@ private fun RoundIconButton(
     Box(
         modifier = Modifier
             .size(44.dp)
-            .background(Color(0xCC0B0D11), CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White)
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = MaterialTheme.colorScheme.onSurface)
     }
 }
 
 @Composable
 private fun CameraOverlay(isReady: Boolean) {
+    val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val bracketColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
     Canvas(modifier = Modifier.fillMaxSize()) {
         val guideWidth = (size.width * 0.68f).coerceIn(size.width * 0.6f, size.width * 0.78f)
         val guideHeight = (size.height * 0.52f).coerceIn(size.height * 0.45f, size.height * 0.62f)
@@ -671,7 +674,6 @@ private fun CameraOverlay(isReady: Boolean) {
             style = Stroke(width = 3.dp.toPx()),
         )
 
-        val gridColor = Color.White.copy(alpha = 0.12f)
         val thirdX = rect.width / 3f
         val thirdY = rect.height / 3f
         drawLine(gridColor, start = Offset(rect.left + thirdX, rect.top), end = Offset(rect.left + thirdX, rect.bottom), strokeWidth = 1.dp.toPx())
@@ -679,7 +681,6 @@ private fun CameraOverlay(isReady: Boolean) {
         drawLine(gridColor, start = Offset(rect.left, rect.top + thirdY), end = Offset(rect.right, rect.top + thirdY), strokeWidth = 1.dp.toPx())
         drawLine(gridColor, start = Offset(rect.left, rect.top + thirdY * 2f), end = Offset(rect.right, rect.top + thirdY * 2f), strokeWidth = 1.dp.toPx())
 
-        val bracketColor = Color.White.copy(alpha = 0.6f)
         val bracket = 24.dp.toPx()
         val bracketStroke = 3.dp.toPx()
         val inset = 8.dp.toPx()
@@ -803,7 +804,7 @@ private fun StatePill(state: QualityState) {
 
 @Composable
 private fun StateLabel(text: String) {
-    Text(text = text, color = Color(0xFF94A3B8), fontSize = 10.sp, letterSpacing = 1.1.sp)
+    Text(text = text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, letterSpacing = 1.1.sp)
 }
 
 @Composable
@@ -846,15 +847,15 @@ private fun StabilityBar(score: Int) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(text = "Hold Still", color = Color(0xFFCBD5F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = "${clamped}%", color = Color(0xFFCBD5F5), fontSize = 13.sp)
+            Text(text = "Hold Still", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "${clamped}%", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         }
         Spacer(modifier = Modifier.height(6.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(6.dp)
-                .background(Color(0xFF0F172A).copy(alpha = 0.6f), RoundedCornerShape(999.dp)),
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(999.dp)),
         ) {
             Box(
                 modifier = Modifier
@@ -1300,11 +1301,11 @@ private fun SideActionButton(
     Box(
         modifier = Modifier
             .size(52.dp)
-            .background(Color(0x401F2937), RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White)
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = MaterialTheme.colorScheme.onSurface)
     }
 }
 

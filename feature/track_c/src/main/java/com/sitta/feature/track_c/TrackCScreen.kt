@@ -34,6 +34,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -128,7 +129,7 @@ fun TrackCScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF101214))
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
@@ -138,7 +139,7 @@ fun TrackCScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RoundIconButton(icon = Icons.Outlined.ArrowBack, contentDescription = "Back", onClick = onBack)
-            Text(text = "Matcher", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "Matcher", color = MaterialTheme.colorScheme.onBackground, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.size(42.dp))
         }
 
@@ -352,7 +353,7 @@ private fun DarkCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1A1D21), RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
             .padding(16.dp),
         content = content,
     )
@@ -360,7 +361,7 @@ private fun DarkCard(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text = text.uppercase(), color = Color(0xFF6B7280), fontSize = 12.sp, letterSpacing = 1.4.sp)
+    Text(text = text.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, letterSpacing = 1.4.sp)
 }
 
 @Composable
@@ -374,7 +375,7 @@ private fun ImageBox(
         modifier = Modifier
             .fillMaxWidth()
             .height(220.dp)
-            .background(Color(0xFF13161B), RoundedCornerShape(20.dp)),
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp)),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap == null) {

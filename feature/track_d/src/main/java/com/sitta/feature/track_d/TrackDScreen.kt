@@ -27,6 +27,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -76,7 +77,7 @@ fun TrackDScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF101214))
+            .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
         Row(
@@ -85,7 +86,7 @@ fun TrackDScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RoundIconButton(icon = Icons.Outlined.ArrowBack, contentDescription = "Back", onClick = onBack)
-            Text(text = "Settings", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "Settings", color = MaterialTheme.colorScheme.onBackground, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.size(42.dp))
         }
 
@@ -149,12 +150,12 @@ fun TrackDScreen(
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14B8A6)),
             shape = RoundedCornerShape(16.dp),
         ) {
-            Text(text = "Export Sessions", color = Color.White)
+            Text(text = "Export Sessions", color = MaterialTheme.colorScheme.onPrimary)
         }
 
         exportMessage.value?.let {
             Spacer(modifier = Modifier.height(10.dp))
-            Text(text = it, color = Color(0xFF9AA6B2), fontSize = 12.sp)
+            Text(text = it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
     }
 }
@@ -170,7 +171,7 @@ private fun SettingsCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1A1D21), RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -188,8 +189,8 @@ private fun SettingsCard(
             }
             Spacer(modifier = Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text(text = subtitle, color = Color(0xFF93A3B5), fontSize = 12.sp)
+                Text(text = title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                Text(text = subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
             trailing()
         }
@@ -205,10 +206,10 @@ private fun RoundIconButton(
     Box(
         modifier = Modifier
             .size(42.dp)
-            .background(Color(0xFF1E242B), CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White)
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = MaterialTheme.colorScheme.onSurface)
     }
 }

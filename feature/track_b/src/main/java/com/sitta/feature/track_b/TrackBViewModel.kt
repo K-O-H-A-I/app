@@ -39,38 +39,54 @@ class TrackBViewModel(
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TrackBUiState())
     val uiState: StateFlow<TrackBUiState> = _uiState.asStateFlow()
+    private var lastProcessedSessionId: String? = null
 
     fun loadLastCapture() {
         viewModelScope.launch(Dispatchers.IO) {
             val tenantId = authManager.activeTenant.value.id
-            val session = sessionRepository.loadLastSession(tenantId)
-            if (session == null) {
+            var session: SessionInfo? = null
+            var rawFile: File? = null
+            repeat(5) { attempt ->
+                session = sessionRepository.loadLastSession(tenantId)
+                if (session != null) {
+                    rawFile = sessionRepository.loadBitmap(tenantId, session!!.sessionId, ArtifactFilenames.SEGMENTED)
+                        ?: sessionRepository.loadBitmap(tenantId, session!!.sessionId, ArtifactFilenames.RAW)
+                }
+                if (session != null && rawFile != null) return@repeat
+                if (attempt < 4) {
+                    kotlinx.coroutines.delay(300L)
+                }
+            }
+            val resolvedSession = session
+            val resolvedRaw = rawFile
+            if (resolvedSession == null) {
                 _uiState.value = _uiState.value.copy(message = "No session found")
                 return@launch
             }
-            val rawFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
-                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.RAW)
-            val roiFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.ROI)
-                ?: sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
-                ?: rawFile
-            val maskFile = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTED)
-            if (roiFile == null) {
+            if (resolvedRaw == null) {
                 _uiState.value = _uiState.value.copy(message = "Capture not found")
                 return@launch
             }
-            val rawBitmap = rawFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
-                ?: BitmapFactory.decodeFile(roiFile.absolutePath)
-            val maskBitmap = sessionRepository.loadBitmap(tenantId, session.sessionId, ArtifactFilenames.SEGMENTATION_MASK)
+            if (lastProcessedSessionId == resolvedSession.sessionId && _uiState.value.enhancedBitmap != null) {
+                return@launch
+            }
+            val rawBitmap = BitmapFactory.decodeFile(resolvedRaw.absolutePath)
+            val maskBitmap = sessionRepository.loadBitmap(tenantId, resolvedSession.sessionId, ArtifactFilenames.SEGMENTATION_MASK)
                 ?.let { BitmapFactory.decodeFile(it.absolutePath) }
-                ?: maskFile?.let { BitmapFactory.decodeFile(it.absolutePath) }
-            val processingBitmap = BitmapFactory.decodeFile(roiFile.absolutePath)
+                ?: deriveMaskFromBitmap(rawBitmap)
             val maskedRaw = if (rawBitmap != null && maskBitmap != null) {
                 applyMask(rawBitmap, maskBitmap)
             } else {
                 rawBitmap
             }
-            _uiState.value = _uiState.value.copy(rawBitmap = maskedRaw, session = session, message = null)
-            processEnhancement(processingBitmap, maskBitmap, session, _uiState.value.sharpenStrength)
+            _uiState.value = _uiState.value.copy(
+                rawBitmap = maskedRaw,
+                maskBitmap = maskBitmap,
+                session = resolvedSession,
+                message = null,
+            )
+            lastProcessedSessionId = resolvedSession.sessionId
+            processEnhancement(maskedRaw ?: rawBitmap, maskBitmap, resolvedSession, _uiState.value.sharpenStrength)
         }
     }
 
@@ -254,6 +270,28 @@ class TrackBViewModel(
         canvas.drawBitmap(scaledMask, 0f, 0f, paint)
         paint.xfermode = null
         return out
+    }
+
+    private fun deriveMaskFromBitmap(source: Bitmap?): Bitmap? {
+        if (source == null) return null
+        val width = source.width
+        val height = source.height
+        if (width == 0 || height == 0) return null
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        val maskPixels = IntArray(pixels.size)
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val a = (pixel ushr 24) and 0xff
+            val r = (pixel ushr 16) and 0xff
+            val g = (pixel ushr 8) and 0xff
+            val b = pixel and 0xff
+            val on = a > 0 && (r + g + b) > 10
+            maskPixels[i] = if (on) 0xFFFFFFFF.toInt() else 0x00000000
+        }
+        val mask = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        mask.setPixels(maskPixels, 0, width, 0, 0, width, height)
+        return mask
     }
 }
 

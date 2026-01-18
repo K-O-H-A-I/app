@@ -30,10 +30,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -105,12 +107,16 @@ fun TrackBScreen(
     val uiState by viewModel.uiState.collectAsState()
     var showExportDialog by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        viewModel.loadLastCapture()
+    }
+
     BackHandler { onBack() }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF101214))
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 18.dp, vertical = 16.dp),
     ) {
@@ -121,7 +127,7 @@ fun TrackBScreen(
         ) {
             RoundIconButton(icon = Icons.Outlined.ArrowBack, contentDescription = "Back", onClick = onBack)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "Enhancement", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(text = "Enhancement", color = MaterialTheme.colorScheme.onBackground, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Text(text = "Complete", color = Color(0xFF38D39F), fontSize = 12.sp)
             }
             Spacer(modifier = Modifier.size(42.dp))
@@ -138,7 +144,7 @@ fun TrackBScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Before", color = Color(0xFF93A3B5), fontSize = 12.sp)
+                Text(text = "Before", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 ActionPill(text = "Load Last Capture", onClick = { viewModel.loadLastCapture() })
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -182,9 +188,9 @@ fun TrackBScreen(
                         Text(text = "OK", color = Color(0xFF14B8A6))
                     }
                 },
-                title = { Text(text = "Enhancement Error", color = Color.White) },
-                text = { Text(text = errorMessage, color = Color(0xFFCBD5F5)) },
-                containerColor = Color(0xFF1C1F24),
+                title = { Text(text = "Enhancement Error", color = MaterialTheme.colorScheme.onSurface) },
+                text = { Text(text = errorMessage, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                containerColor = MaterialTheme.colorScheme.surface,
             )
         } else if (message != null) {
             Spacer(modifier = Modifier.height(12.dp))
@@ -204,15 +210,15 @@ fun TrackBScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF14B8A6)),
                 shape = RoundedCornerShape(20.dp),
             ) {
-                Text(text = "Save in ISO Format", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(text = "Save in ISO Format", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
         if (showExportDialog) {
             AlertDialog(
                 onDismissRequest = { showExportDialog = false },
-                title = { Text(text = "Export format", color = Color.White) },
-                text = { Text(text = "Choose a format to export.", color = Color(0xFFCBD5F5)) },
+                title = { Text(text = "Export format", color = MaterialTheme.colorScheme.onSurface) },
+                text = { Text(text = "Choose a format to export.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 confirmButton = {
                     TextButton(onClick = {
                         showExportDialog = false
@@ -229,7 +235,7 @@ fun TrackBScreen(
                         Text(text = "TIFF", color = Color(0xFF14B8A6))
                     }
                 },
-                containerColor = Color(0xFF1C1F24),
+                containerColor = MaterialTheme.colorScheme.surface,
             )
         }
     }
@@ -240,7 +246,7 @@ private fun DarkCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1A1D21), RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
             .padding(16.dp),
         content = content,
     )
@@ -253,7 +259,7 @@ private fun SectionTitle(text: String, trailingLabel: String? = null) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = text.uppercase(), color = Color(0xFF6B7280), fontSize = 12.sp, letterSpacing = 1.4.sp)
+        Text(text = text.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, letterSpacing = 1.4.sp)
         trailingLabel?.let {
             Box(
                 modifier = Modifier
@@ -271,7 +277,7 @@ private fun ImagePane(title: String, bitmap: android.graphics.Bitmap?, modifier:
     Box(
         modifier = modifier
             .height(160.dp)
-            .background(Color(0xFF13161B), RoundedCornerShape(20.dp)),
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(20.dp)),
     ) {
         if (bitmap == null) {
             Box(
@@ -309,7 +315,7 @@ private fun ProcessingItem(title: String, time: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF172422), RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -319,13 +325,13 @@ private fun ProcessingItem(title: String, time: String) {
                     .background(Color(0xFF14B8A6), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(imageVector = Icons.Outlined.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Icon(imageVector = Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text(text = title, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             }
-            Text(text = time, color = Color(0xFF7C8A9B), fontSize = 12.sp)
+            Text(text = time, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
     }
 }
@@ -364,11 +370,11 @@ private fun RoundIconButton(
     Box(
         modifier = Modifier
             .size(42.dp)
-            .background(Color(0xFF1E242B), CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White)
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -377,9 +383,9 @@ private fun ErrorBanner(message: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF3B1E27), RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(14.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        Text(text = message, color = Color(0xFFFCA5A5), fontSize = 12.sp)
+        Text(text = message, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp)
     }
 }
