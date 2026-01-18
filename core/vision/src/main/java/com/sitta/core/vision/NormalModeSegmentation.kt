@@ -28,13 +28,30 @@ class NormalModeSegmentation {
         if (!OpenCvUtils.ensureLoadedOrFalse()) return null
         val src = OpenCvUtils.bitmapToMat(input)
         if (src.empty()) return null
+        val bgr = Mat()
+        when (src.channels()) {
+            4 -> Imgproc.cvtColor(src, bgr, Imgproc.COLOR_RGBA2BGR)
+            3 -> src.copyTo(bgr)
+            1 -> Imgproc.cvtColor(src, bgr, Imgproc.COLOR_GRAY2BGR)
+            else -> return null
+        }
 
-        val hsvMask = hsvSkinSegmentation(src)
-        val grabcutMask = grabcutSegmentation(src, hsvMask)
+        val hsvMask = hsvSkinSegmentation(bgr)
+        var grabcutMask = grabcutSegmentation(bgr, hsvMask)
+        if (grabcutMask.size() != hsvMask.size()) {
+            val resized = Mat()
+            Imgproc.resize(grabcutMask, resized, hsvMask.size(), 0.0, 0.0, Imgproc.INTER_NEAREST)
+            grabcutMask = resized
+        }
+        if (grabcutMask.type() != CvType.CV_8UC1) {
+            val converted = Mat()
+            grabcutMask.convertTo(converted, CvType.CV_8UC1)
+            grabcutMask = converted
+        }
         val finalMask = refineSegmentationMask(hsvMask, grabcutMask)
 
         val segmented = Mat()
-        Core.bitwise_and(src, src, segmented, finalMask)
+        Core.bitwise_and(bgr, bgr, segmented, finalMask)
 
         val maskBitmap = OpenCvUtils.matToBitmap(finalMask, true)
         val segmentedBitmap = OpenCvUtils.matToBitmap(segmented, false)

@@ -21,10 +21,21 @@ class NormalModeRidgeExtractor {
         val mask = if (maskBitmap != null) {
             val maskMat = OpenCvUtils.bitmapToMat(maskBitmap)
             val grayMask = Mat()
-            Imgproc.cvtColor(maskMat, grayMask, Imgproc.COLOR_RGBA2GRAY)
+            when (maskMat.channels()) {
+                4 -> Imgproc.cvtColor(maskMat, grayMask, Imgproc.COLOR_RGBA2GRAY)
+                3 -> Imgproc.cvtColor(maskMat, grayMask, Imgproc.COLOR_BGR2GRAY)
+                1 -> maskMat.copyTo(grayMask)
+                else -> Imgproc.cvtColor(maskMat, grayMask, Imgproc.COLOR_RGBA2GRAY)
+            }
             val binary = Mat()
             Imgproc.threshold(grayMask, binary, 1.0, 255.0, Imgproc.THRESH_BINARY)
-            binary
+            if (binary.size() != bgr.size()) {
+                val resized = Mat()
+                Imgproc.resize(binary, resized, bgr.size(), 0.0, 0.0, Imgproc.INTER_NEAREST)
+                resized
+            } else {
+                binary
+            }
         } else {
             buildNonBlackMask(bgr)
         }

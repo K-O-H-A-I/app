@@ -979,7 +979,11 @@ class TrackAViewModel(
                 scaleRatio < TrackACaptureConfig.scaleMin -> "Move closer to the camera"
                 detection.isDetected && coverage < TrackACaptureConfig.coverageEnter -> "Move fingers into the box"
                 !centerValid || centerScoreFinal < centerThreshold -> "Center fingers in guide"
-                focusScore < focusThreshold -> "Hold steady for focus"
+                focusScore < focusThreshold -> when {
+                    scaleRatio < TrackACaptureConfig.scaleIdealMin -> "Move hand closer for better focus"
+                    scaleRatio > TrackACaptureConfig.scaleIdealMax -> "Move hand farther for better focus"
+                    else -> "Hold steady to improve focus"
+                }
                 lightScore < lightThreshold -> "Add more light or flash"
                 steadyScore < steadyThreshold -> "Hold still"
                 softScore < softThreshold -> "Adjust hand position"
