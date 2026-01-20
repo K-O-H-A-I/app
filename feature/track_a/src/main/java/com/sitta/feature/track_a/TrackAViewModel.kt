@@ -280,7 +280,7 @@ class TrackAViewModel(
     private fun evaluateLivenessIfNeeded(bitmap: Bitmap, roi: Rect): Boolean {
         if (!livenessEnabled) return true
         livenessFrames.addLast(bitmap)
-        if (livenessFrames.size < 5) {
+        if (livenessFrames.size < 30) {
             return lastLivenessResult?.decision == "PASS"
         }
         val frames = livenessFrames.toList()
