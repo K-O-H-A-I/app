@@ -103,8 +103,20 @@ class TrackScreensTest {
                 )
             }
         }
+        val fingerRidgeExtractor = com.sitta.core.vision.NormalModeRidgeExtractor()
+        val fingerSkeletonizer = com.sitta.core.vision.FingerSkeletonizer()
+        val segmentation = com.sitta.core.vision.NormalModeSegmentation()
         composeRule.setContent {
-            TrackBScreen(sessionRepository, authManager, enhancementPipeline, qualityAnalyzer, onBack = {})
+            TrackBScreen(
+                sessionRepository,
+                authManager,
+                enhancementPipeline,
+                qualityAnalyzer,
+                fingerRidgeExtractor,
+                fingerSkeletonizer,
+                segmentation,
+                onBack = {},
+            )
         }
         composeRule.onNodeWithText("Load Last Capture").assertExists()
     }

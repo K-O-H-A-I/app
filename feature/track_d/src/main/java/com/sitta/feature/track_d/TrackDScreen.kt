@@ -118,20 +118,6 @@ fun TrackDScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        SettingsCard(
-            icon = Icons.Outlined.BugReport,
-            iconColor = Color(0xFFF97316),
-            title = "Debug Landmarks",
-            subtitle = "Show landmark overlay in capture",
-        ) {
-            Switch(
-                checked = uiState.debugOverlayEnabled,
-                onCheckedChange = { viewModel.setDebugOverlayEnabled(it) },
-            )
-        }
-
         Spacer(modifier = Modifier.height(20.dp))
 
         Button(

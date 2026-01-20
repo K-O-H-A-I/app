@@ -43,6 +43,7 @@ fun SittaApp(container: AppContainer) {
                 fingerDetector = container.fingerDetector,
                 fingerSceneAnalyzer = container.fingerSceneAnalyzer,
                 segmentation = container.segmentation,
+                origin = origin,
                 onCaptureComplete = {
                     if (origin == "match") {
                         navController.popBackStack("trackC", inclusive = false)
@@ -61,6 +62,7 @@ fun SittaApp(container: AppContainer) {
                 qualityAnalyzer = container.qualityAnalyzer,
                 ridgeExtractor = container.fingerRidgeExtractor,
                 skeletonizer = container.fingerSkeletonizer,
+                segmentationPipeline = container.segmentation,
                 onBack = { navController.popBackStack("home", inclusive = false) },
             )
         }

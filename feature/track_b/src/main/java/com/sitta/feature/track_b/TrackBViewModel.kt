@@ -35,6 +35,7 @@ class TrackBViewModel(
     private val qualityAnalyzer: QualityAnalyzer,
     private val ridgeExtractor: NormalModeRidgeExtractor,
     private val skeletonizer: FingerSkeletonizer,
+    private val segmentationPipeline: com.sitta.core.vision.NormalModeSegmentation,
     private val appContext: android.content.Context,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(TrackBUiState())
@@ -43,41 +44,75 @@ class TrackBViewModel(
 
     fun loadLastCapture() {
         viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = _uiState.value.copy(
+                steps = listOf(com.sitta.core.domain.EnhancementStep("Loading last capture", 0)),
+                message = null,
+            )
             val tenantId = authManager.activeTenant.value.id
             var session: SessionInfo? = null
+            var segmentedFile: File? = null
             var rawFile: File? = null
             repeat(5) { attempt ->
                 session = sessionRepository.loadLastSession(tenantId)
                 if (session != null) {
-                    rawFile = sessionRepository.loadBitmap(tenantId, session!!.sessionId, ArtifactFilenames.SEGMENTED)
-                        ?: sessionRepository.loadBitmap(tenantId, session!!.sessionId, ArtifactFilenames.RAW)
+                    segmentedFile = sessionRepository.loadBitmap(tenantId, session!!.sessionId, ArtifactFilenames.SEGMENTED)
+                    rawFile = sessionRepository.loadBitmap(tenantId, session!!.sessionId, ArtifactFilenames.RAW)
                 }
-                if (session != null && rawFile != null) return@repeat
+                if (session != null && (segmentedFile != null || rawFile != null)) return@repeat
                 if (attempt < 4) {
                     kotlinx.coroutines.delay(300L)
                 }
             }
             val resolvedSession = session
+            val resolvedSegmented = segmentedFile
             val resolvedRaw = rawFile
             if (resolvedSession == null) {
                 _uiState.value = _uiState.value.copy(message = "No session found")
                 return@launch
             }
-            if (resolvedRaw == null) {
+            if (resolvedSegmented == null && resolvedRaw == null) {
                 _uiState.value = _uiState.value.copy(message = "Capture not found")
                 return@launch
             }
             if (lastProcessedSessionId == resolvedSession.sessionId && _uiState.value.enhancedBitmap != null) {
                 return@launch
             }
-            val rawBitmap = BitmapFactory.decodeFile(resolvedRaw.absolutePath)
-            val maskBitmap = sessionRepository.loadBitmap(tenantId, resolvedSession.sessionId, ArtifactFilenames.SEGMENTATION_MASK)
+            val sourceFile = resolvedSegmented ?: resolvedRaw!!
+            val rawBitmap = BitmapFactory.decodeFile(sourceFile.absolutePath)
+            if (rawBitmap == null) {
+                _uiState.value = _uiState.value.copy(message = "Unable to load capture")
+                return@launch
+            }
+            var maskBitmap = sessionRepository.loadBitmap(tenantId, resolvedSession.sessionId, ArtifactFilenames.SEGMENTATION_MASK)
                 ?.let { BitmapFactory.decodeFile(it.absolutePath) }
-                ?: deriveMaskFromBitmap(rawBitmap)
-            val maskedRaw = if (rawBitmap != null && maskBitmap != null) {
-                applyMask(rawBitmap, maskBitmap)
-            } else {
-                rawBitmap
+            var maskedRaw = rawBitmap
+            val rawSourceBitmap = resolvedRaw?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            if (maskBitmap == null && rawSourceBitmap != null) {
+                _uiState.value = _uiState.value.copy(
+                    steps = listOf(
+                        com.sitta.core.domain.EnhancementStep("Loading last capture", 0),
+                        com.sitta.core.domain.EnhancementStep("Masking raw image", 0),
+                    ),
+                )
+                val segmentation = segmentationPipeline.segment(rawSourceBitmap)
+                if (segmentation != null) {
+                    maskedRaw = segmentation.segmented
+                    maskBitmap = segmentation.mask
+                    sessionRepository.saveBitmap(resolvedSession, ArtifactFilenames.SEGMENTED, segmentation.segmented)
+                    sessionRepository.saveBitmap(resolvedSession, ArtifactFilenames.SEGMENTATION_MASK, segmentation.mask)
+                }
+            }
+            if (maskBitmap == null) {
+                _uiState.value = _uiState.value.copy(
+                    steps = listOf(
+                        com.sitta.core.domain.EnhancementStep("Loading last capture", 0),
+                        com.sitta.core.domain.EnhancementStep("Masking raw image", 0),
+                    ),
+                )
+                maskBitmap = deriveMaskFromBitmap(rawBitmap)
+            }
+            if (maskBitmap != null) {
+                maskedRaw = applyMask(rawBitmap, maskBitmap)
             }
             _uiState.value = _uiState.value.copy(
                 rawBitmap = maskedRaw,
@@ -138,26 +173,30 @@ class TrackBViewModel(
             }
             val ridgeBitmap = ridgeResult.ridgeBitmap
             val ridgeDensity = computeRidgeDensity(ridgeBitmap)
-            val skeletonBitmap = if (ridgeDensity in 0.15..0.6) {
-                skeletonizer.skeletonize(ridgeBitmap)
-            } else {
-                skeletonizer.skeletonize(ridgeBitmap)
-            }
+            val skeletonStart = System.nanoTime()
+            val skeletonBitmap = skeletonizer.skeletonize(ridgeBitmap)
+            val skeletonMs = ((System.nanoTime() - skeletonStart) / 1_000_000L).coerceAtLeast(1)
             val t0 = System.nanoTime()
             val quality = qualityAnalyzer.analyze(
                 result.bitmap,
                 android.graphics.Rect(0, 0, result.bitmap.width, result.bitmap.height),
             )
             val qualityMs = ((System.nanoTime() - t0) / 1_000_000L).coerceAtLeast(1)
-            val message = if (ridgeDensity !in 0.15..0.6) {
-                "Ridge quality too low for skeleton (exporting anyway)"
-            } else null
+            val message = null
+            val baseSteps = if (result.steps.isEmpty()) {
+                listOf(com.sitta.core.domain.EnhancementStep("Enhancement", 1))
+            } else {
+                result.steps
+            }
             _uiState.value = _uiState.value.copy(
                 enhancedBitmap = result.bitmap,
                 ridgeBitmap = ridgeBitmap,
                 skeletonBitmap = skeletonBitmap,
                 maskBitmap = maskBitmap,
-                steps = result.steps + com.sitta.core.domain.EnhancementStep("Quality Check", qualityMs),
+                steps = baseSteps +
+                    com.sitta.core.domain.EnhancementStep("Ridge Map", 1) +
+                    com.sitta.core.domain.EnhancementStep("Skeletonize", skeletonMs) +
+                    com.sitta.core.domain.EnhancementStep("Quality Check", qualityMs),
                 qualityResult = quality,
                 message = message,
             )

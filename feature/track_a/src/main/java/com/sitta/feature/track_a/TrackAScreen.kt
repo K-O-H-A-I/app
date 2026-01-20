@@ -141,6 +141,7 @@ fun TrackAScreen(
     fingerDetector: FingerDetector,
     fingerSceneAnalyzer: FingerSceneAnalyzer,
     segmentation: NormalModeSegmentation,
+    origin: String,
     onCaptureComplete: () -> Unit,
     onBack: () -> Unit,
     enableCamera: Boolean = true,
@@ -162,10 +163,12 @@ fun TrackAScreen(
 
     LaunchedEffect(uiState.lastSessionId) {
         if (uiState.lastSessionId != null) {
-            if (uiState.captureSource == CaptureSource.AUTO) {
-                kotlinx.coroutines.delay(350L)
+            kotlinx.coroutines.delay(1000L)
+            if (origin == "match") {
+                onCaptureComplete()
+            } else {
+                onBack()
             }
-            onCaptureComplete()
         }
     }
 
@@ -502,9 +505,6 @@ fun TrackAScreen(
             )
             CameraOverlay(isReady = uiState.captureEnabled)
             FingerprintGuideOverlay(visible = !uiState.captureEnabled, horizontal = isHorizontal)
-            if (BuildConfig.DEBUG && uiState.debugOverlayEnabled) {
-                LandmarkOverlay(landmarks = mappedLandmarks)
-            }
 
             Column(
                 modifier = Modifier
@@ -541,17 +541,6 @@ fun TrackAScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                         )
-                        if (uiState.debugOverlayEnabled) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "CloseUp ${"%.2f".format(uiState.closeUpConfidence)} " +
-                                    "skin ${"%.2f".format(uiState.closeUpSkinRatio)} " +
-                                    "ridge ${"%.2f".format(uiState.closeUpRidgeScore)} " +
-                                    "edge ${"%.2f".format(uiState.closeUpEdgeScore)}",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                            )
-                        }
                     }
                 }
 

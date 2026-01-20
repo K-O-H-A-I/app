@@ -64,6 +64,7 @@ class TrackBViewModelFactory(
     private val qualityAnalyzer: QualityAnalyzer,
     private val ridgeExtractor: com.sitta.core.vision.NormalModeRidgeExtractor,
     private val skeletonizer: com.sitta.core.vision.FingerSkeletonizer,
+    private val segmentationPipeline: com.sitta.core.vision.NormalModeSegmentation,
     private val appContext: android.content.Context,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -76,6 +77,7 @@ class TrackBViewModelFactory(
                 qualityAnalyzer,
                 ridgeExtractor,
                 skeletonizer,
+                segmentationPipeline,
                 appContext,
             ) as T
         }
@@ -91,6 +93,7 @@ fun TrackBScreen(
     qualityAnalyzer: QualityAnalyzer,
     ridgeExtractor: com.sitta.core.vision.NormalModeRidgeExtractor,
     skeletonizer: com.sitta.core.vision.FingerSkeletonizer,
+    segmentationPipeline: com.sitta.core.vision.NormalModeSegmentation,
     onBack: () -> Unit,
 ) {
     val viewModel: TrackBViewModel = viewModel(
@@ -101,6 +104,7 @@ fun TrackBScreen(
             qualityAnalyzer,
             ridgeExtractor,
             skeletonizer,
+            segmentationPipeline,
             LocalContext.current.applicationContext,
         ),
     )
@@ -165,12 +169,9 @@ fun TrackBScreen(
         SectionTitle(text = "Processing Steps")
         Spacer(modifier = Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (uiState.steps.isEmpty()) {
-                ProcessingItem("Waiting for enhancement", "--")
-            } else {
-                uiState.steps.forEach { step ->
-                    ProcessingItem(step.name, "${step.durationMs}ms")
-                }
+            uiState.steps.forEach { step ->
+                val duration = if (step.durationMs <= 0L) "--" else "${step.durationMs}ms"
+                ProcessingItem(step.name, duration)
             }
         }
 
@@ -192,9 +193,6 @@ fun TrackBScreen(
                 text = { Text(text = errorMessage, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 containerColor = MaterialTheme.colorScheme.surface,
             )
-        } else if (message != null) {
-            Spacer(modifier = Modifier.height(12.dp))
-            ErrorBanner(message = message)
         }
 
         Spacer(modifier = Modifier.height(20.dp))

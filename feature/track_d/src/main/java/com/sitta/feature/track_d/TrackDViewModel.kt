@@ -18,23 +18,13 @@ class TrackDViewModel(private val settingsRepository: SettingsRepository) : View
                 _uiState.value = _uiState.value.copy(autoCaptureEnabled = enabled)
             }
         }
-        viewModelScope.launch {
-            settingsRepository.debugOverlayEnabled.collect { enabled ->
-                _uiState.value = _uiState.value.copy(debugOverlayEnabled = enabled)
-            }
-        }
     }
 
     fun setAutoCaptureEnabled(enabled: Boolean) {
         settingsRepository.setAutoCaptureEnabled(enabled)
     }
-
-    fun setDebugOverlayEnabled(enabled: Boolean) {
-        settingsRepository.setDebugOverlayEnabled(enabled)
-    }
 }
 
 data class TrackDState(
     val autoCaptureEnabled: Boolean = true,
-    val debugOverlayEnabled: Boolean = false,
 )

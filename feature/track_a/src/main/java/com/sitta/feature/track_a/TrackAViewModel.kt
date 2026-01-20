@@ -82,7 +82,6 @@ class TrackAViewModel(
     private var lastLandmarkMillis: Long = 0L
     private var livenessEnabled: Boolean = false
     private var autoCaptureEnabled: Boolean = true
-    private var debugOverlayEnabled: Boolean = false
     private var focusRequested: Boolean = false
     private var focusSettledAt: Long = 0L
     private var focusAttemptedAt: Long = 0L
@@ -128,11 +127,6 @@ class TrackAViewModel(
         viewModelScope.launch {
             settingsRepository.autoCaptureEnabled.collect { enabled ->
                 autoCaptureEnabled = enabled
-            }
-        }
-        viewModelScope.launch {
-            settingsRepository.debugOverlayEnabled.collect { enabled ->
-                debugOverlayEnabled = enabled
             }
         }
     }
@@ -348,7 +342,7 @@ class TrackAViewModel(
         lastCaptureMs = System.currentTimeMillis()
         lastCaptureSource = source
         val captureMode = currentCaptureMode
-        val notice = if (source == CaptureSource.AUTO) "Auto capture" else "Captured"
+        val notice = if (source == CaptureSource.AUTO) "Auto capture" else "Image Captured"
         _uiState.value = _uiState.value.copy(
             captureNotice = notice,
             captureSource = source,
@@ -448,7 +442,7 @@ class TrackAViewModel(
         lastCaptureMs = System.currentTimeMillis()
         lastCaptureSource = source
         val captureMode = currentCaptureMode
-        val notice = if (source == CaptureSource.AUTO) "Auto capture" else "Captured"
+        val notice = if (source == CaptureSource.AUTO) "Auto capture" else "Image Captured"
         _uiState.value = _uiState.value.copy(
             captureNotice = notice,
             captureSource = source,
@@ -958,7 +952,6 @@ class TrackAViewModel(
             detection = detection,
             centerScore = centerScoreFinal,
             overlayLandmarks = overlayLandmarksFor(frame.timestamp),
-            debugOverlayEnabled = debugOverlayEnabled,
             focusScore = focusScore,
             lightScore = lightScore,
             steadyScore = steadyScore,
@@ -1040,7 +1033,6 @@ class TrackAViewModel(
             detection = latestDetection,
             centerScore = 0,
             overlayLandmarks = overlayLandmarksFor(timestampMillis),
-            debugOverlayEnabled = debugOverlayEnabled,
             focusScore = focusScore,
             lightScore = lightScore,
             steadyScore = steadyScore,
@@ -1355,7 +1347,6 @@ data class TrackAUiState(
     val detection: FingerDetectionResult? = null,
     val centerScore: Int = 0,
     val overlayLandmarks: List<com.sitta.core.vision.FingerLandmark> = emptyList(),
-    val debugOverlayEnabled: Boolean = false,
     val focusScore: Int = 0,
     val lightScore: Int = 0,
     val steadyScore: Int = 0,

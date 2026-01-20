@@ -79,4 +79,5 @@ class NormalModeRidgeExtractor {
         Imgproc.threshold(gray, mask, 1.0, 255.0, Imgproc.THRESH_BINARY)
         return mask
     }
+
 }
